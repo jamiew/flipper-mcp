@@ -69,6 +69,16 @@ def _close_bridge() -> None:
 atexit.register(_close_bridge)
 
 
+def _hex_arg(s: str) -> str:
+    """Normalize an IR/RF hex arg: drop spaces and one optional 0x prefix.
+
+    Uses removeprefix, not lstrip: lstrip strips a *charset*, so "0700" would
+    become "700" and "0x0A" would become "A", silently corrupting codes with
+    leading-zero bytes.
+    """
+    return s.replace(" ", "").removeprefix("0x").removeprefix("0X")
+
+
 # -- discovery / info ------------------------------------------------------
 
 
@@ -213,9 +223,7 @@ def ir_tx(protocol: str, address: str, command: str) -> str:
     this returns "failed to load external command", refresh the firmware
     via qFlipper to update the external CLI plugins.
     """
-    addr = address.replace(" ", "").lstrip("0x").lstrip("0X")
-    cmd = command.replace(" ", "").lstrip("0x").lstrip("0X")
-    return _get_bridge().send(f"ir tx {protocol} {addr} {cmd}")
+    return _get_bridge().send(f"ir tx {protocol} {_hex_arg(address)} {_hex_arg(command)}")
 
 
 # -- system -----------------------------------------------------------------
