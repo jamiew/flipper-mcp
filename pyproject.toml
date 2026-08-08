@@ -4,7 +4,7 @@ version = "0.5.0"
 description = "MCP server for driving a Flipper Zero over USB-CDC serial, with a bundled RF/IR protocol registry."
 requires-python = ">=3.11"
 dependencies = [
-  "mcp>=1.2",
+  "mcp>=1.2,<2",  # mcp 2.0 dropped the bundled mcp.server.fastmcp module
   "pyserial>=3.5",
   "pydantic>=2.0",
 ]
@@ -12,6 +12,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "pytest>=8.0",
+  "ruff>=0.16",
 ]
 
 [project.scripts]
@@ -29,3 +30,17 @@ packages = ["flipper_mcp"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+# E/F pycodestyle+pyflakes, I isort, UP pyupgrade, B bugbear, SIM simplify,
+# S bandit (the code already carries `# noqa: S310` markers, so S is intended).
+select = ["E", "F", "I", "UP", "B", "SIM", "S", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]  # asserts are the point in tests
+# registry.py fetches remote indexes; _require_http_url() gates the scheme.
+"flipper_mcp/registry.py" = ["S310"]
