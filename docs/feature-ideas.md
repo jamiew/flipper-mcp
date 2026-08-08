@@ -4,6 +4,10 @@ Prioritized additions drawn from the [landscape](landscape.md) gap analysis.
 Principle: extend Str1ck9's moat (signal *identification* + UI automation), don't
 just chase tool count. Grouped by leverage vs effort.
 
+> Deeper, source-level version in [`opportunities.md`](opportunities.md): exact
+> CLI commands, file:line fixes, a staged protobuf-RPC plan, firmware specifics,
+> and a concrete safety model. That doc supersedes the tiers below where they overlap.
+
 ## The transport question (blocks tier 1a)
 
 Str1ck9 is a **pure USB-CLI-text** bridge. Several high-value features

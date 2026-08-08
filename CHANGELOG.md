@@ -5,6 +5,18 @@
 Forked from [Str1ck9/flipper-mcp](https://github.com/Str1ck9/flipper-mcp) at
 v0.5.0 to harden it and grow the tool surface. See [`docs/`](docs/).
 
+### `ir_tx` leading-zero fix
+
+- `ir_tx` normalized hex with `lstrip("0x")`, which strips a charset not a
+  prefix, so `0700` transmitted as `700` and `0x0A` as `A`. Silent wrong-code
+  bug on every leading-zero byte. Now uses `removeprefix`, with a regression test.
+
+### Opportunity report
+
+- `docs/opportunities.md`: a workflow-generated roadmap (codebase fixes, the
+  CLI-vs-protobuf-RPC transport plan, Momentum/Unleashed/RogueMaster firmware
+  notes, features to import with exact CLI commands, and a safety model).
+
 ### Startup fix: pin `mcp<2`
 
 - mcp 2.0 removed the `mcp.server.fastmcp` module the server imports, crashing it
