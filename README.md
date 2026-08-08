@@ -1,5 +1,12 @@
 # flipper-mcp
 
+> **This is a fork** of [Str1ck9/flipper-mcp](https://github.com/Str1ck9/flipper-mcp).
+> Goal: harden it, keep it current, and grow the tool surface toward the best
+> ideas across the Flipper-MCP landscape (see [`docs/landscape.md`](docs/landscape.md)).
+> So far: pinned `mcp<2` (fixed a startup crash), added a ruff config and a
+> lint/format pass, hardened the registry URL fetcher, and started a `docs/`
+> dir. See [`CHANGELOG.md`](CHANGELOG.md) and [`docs/dev-notes.md`](docs/dev-notes.md).
+
 An [MCP](https://modelcontextprotocol.io) server that gives an LLM hands on a
 [Flipper Zero](https://flipper.net/) over USB-CDC.
 
@@ -61,13 +68,46 @@ flipper-smoke
 # → (device_info output)
 ```
 
+> **Dependency note:** `mcp` is pinned `<2`. mcp 2.0 dropped the bundled
+> `mcp.server.fastmcp` module this server imports. If startup fails with
+> `ModuleNotFoundError: No module named 'mcp.server.fastmcp'`, you have mcp 2.x;
+> run `uv pip install "mcp>=1.2,<2"`.
+
 ## Wire into Claude Code
 
+**Project scope** (only this repo, config committed to `.mcp.json`):
+
 ```bash
-claude mcp add --scope user flipper $(pwd)/.venv/bin/flipper-mcp
+claude mcp add --scope project flipper "$(pwd)/.venv/bin/flipper-mcp"
 ```
 
-Restart Claude Code. The `mcp__flipper__*` tools appear in every project.
+This writes `.mcp.json` in the repo root. On next launch Claude Code prompts you
+once to approve the project server; after that the `mcp__flipper__*` tools are
+available whenever you work in this directory.
+
+**User scope** (all your projects) — swap `--scope project` for `--scope user`.
+
+If the CLI can't write the config (sandbox/permissions), create `.mcp.json` by hand:
+
+```json
+{
+  "mcpServers": {
+    "flipper": {
+      "type": "stdio",
+      "command": "/absolute/path/to/flipper-mcp/.venv/bin/flipper-mcp"
+    }
+  }
+}
+```
+
+Smoke-test the server without hardware (lists all tools over stdio):
+
+```bash
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}' \
+  '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | .venv/bin/flipper-mcp
+```
 
 ## Wire into Claude Desktop
 
