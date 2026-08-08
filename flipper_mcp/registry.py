@@ -18,17 +18,17 @@ import importlib.resources
 import json
 import os
 import re
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 from pydantic import BaseModel, Field, ValidationError
 
 
 class Fingerprint(BaseModel):
     regex_patterns: list[str] = Field(default_factory=list)
-    bit_length_range: Optional[list[int]] = None
+    bit_length_range: list[int] | None = None
 
 
 class DecoderField(BaseModel):
@@ -46,12 +46,12 @@ class Protocol(BaseModel):
     name: str
     category: str  # subghz | ir | nfc | lfrfid | ble
     typical_frequencies_hz: list[int] = Field(default_factory=list)
-    modulation: Optional[str] = None
-    typical_bit_rate: Optional[int] = None
+    modulation: str | None = None
+    typical_bit_rate: int | None = None
     fingerprint: Fingerprint = Field(default_factory=Fingerprint)
     decoder: Decoder = Field(default_factory=Decoder)
     typical_devices: list[str] = Field(default_factory=list)
-    security_notes: Optional[str] = None
+    security_notes: str | None = None
     references: list[str] = Field(default_factory=list)
     packs: list[str] = Field(default_factory=list)
 
@@ -86,7 +86,7 @@ class Registry:
     # -- loading -----------------------------------------------------------
 
     @classmethod
-    def load_bundled(cls) -> "Registry":
+    def load_bundled(cls) -> Registry:
         """Load only the protocols bundled with the package."""
         protos: list[Protocol] = []
         pkg = importlib.resources.files("flipper_mcp") / "protocols"
@@ -97,7 +97,7 @@ class Registry:
         return cls(protos)
 
     @classmethod
-    def load(cls, include_user_cache: bool = True) -> "Registry":
+    def load(cls, include_user_cache: bool = True) -> Registry:
         """Load bundled protocols, overlaid with the user cache.
 
         User-installed protocols with the same ``id`` as a bundled entry
@@ -128,8 +128,8 @@ class Registry:
 
     def list(
         self,
-        category: Optional[str] = None,
-        pack: Optional[str] = None,
+        category: str | None = None,
+        pack: str | None = None,
     ) -> list[Protocol]:
         result = self.all()
         if category:
@@ -138,7 +138,7 @@ class Registry:
             result = [p for p in result if pack in p.packs]
         return sorted(result, key=lambda p: (p.category, p.id))
 
-    def get(self, protocol_id: str) -> Optional[Protocol]:
+    def get(self, protocol_id: str) -> Protocol | None:
         return self._by_id.get(protocol_id)
 
     # -- fingerprinting ----------------------------------------------------
@@ -159,7 +159,7 @@ class Registry:
             text = pat.sub("", text)
         return text
 
-    def fingerprint(self, text: str, category: Optional[str] = None) -> list[Match]:
+    def fingerprint(self, text: str, category: str | None = None) -> list[Match]:
         """Return matches for every protocol whose patterns hit in ``text``.
 
         Matching is case-insensitive + multi-line. Each protocol matches at
@@ -172,7 +172,7 @@ class Registry:
 
         matches: list[Match] = []
         for proto in self.list(category=category):
-            hit_pattern: Optional[str] = None
+            hit_pattern: str | None = None
             for pattern in proto.fingerprint.regex_patterns:
                 if re.search(pattern, cleaned, flags=re.IGNORECASE | re.MULTILINE):
                     hit_pattern = pattern
@@ -214,7 +214,7 @@ FLIPPER_FILE_TYPES = {
 }
 
 
-def _extract_kv(content: str, key: str) -> Optional[str]:
+def _extract_kv(content: str, key: str) -> str | None:
     m = re.search(rf"^{re.escape(key)}\s*:\s*(.+?)$", content, re.MULTILINE)
     return m.group(1).strip() if m else None
 
@@ -249,17 +249,14 @@ def classify_file(content: str) -> dict:
     elif kind == "nfc":
         result["device_type"] = _extract_kv(content, "Device type")
         result["uid"] = _extract_kv(content, "UID")
-    elif kind == "lfrfid":
-        result["key_type"] = _extract_kv(content, "Key type")
-        result["data"] = _extract_kv(content, "Data")
-    elif kind == "ibutton":
+    elif kind == "lfrfid" or kind == "ibutton":
         result["key_type"] = _extract_kv(content, "Key type")
         result["data"] = _extract_kv(content, "Data")
 
     return result
 
 
-def _int_or_none(s: Optional[str]) -> Optional[int]:
+def _int_or_none(s: str | None) -> int | None:
     if s is None:
         return None
     try:
@@ -269,7 +266,7 @@ def _int_or_none(s: Optional[str]) -> Optional[int]:
 
 
 # Singleton — loaded on first call, resettable after mutating the cache.
-_registry: Optional[Registry] = None
+_registry: Registry | None = None
 
 
 def get_registry() -> Registry:
@@ -295,17 +292,17 @@ def reset_registry() -> None:
 class RemoteProtocolEntry(BaseModel):
     id: str
     url: str
-    sha256: Optional[str] = None
+    sha256: str | None = None
     version: int = 1
-    name: Optional[str] = None
-    category: Optional[str] = None
+    name: str | None = None
+    category: str | None = None
     packs: list[str] = Field(default_factory=list)
 
 
 class RemoteIndex(BaseModel):
     schema_version: int = 1
     name: str = "flipper-rf-registry"
-    description: Optional[str] = None
+    description: str | None = None
     protocols: list[RemoteProtocolEntry] = Field(default_factory=list)
 
 
@@ -323,12 +320,18 @@ def user_cache_dir() -> Path:
     return base / "flipper-mcp" / "protocols"
 
 
+def _require_http_url(url: str) -> None:
+    """Reject non-http(s) URLs so a registry index can't pull in file:// etc."""
+    scheme = urllib.parse.urlparse(url).scheme.lower()
+    if scheme not in ("http", "https"):
+        raise RegistryError(f"Refusing to fetch non-http(s) URL: {url!r}")
+
+
 def fetch_index(url: str, timeout: float = 15.0) -> RemoteIndex:
     """Download and parse a remote registry index."""
-    req = urllib.request.Request(
-        url, headers={"User-Agent": "flipper-mcp/0.3 (+registry-sync)"}
-    )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+    _require_http_url(url)
+    req = urllib.request.Request(url, headers={"User-Agent": "flipper-mcp/0.3 (+registry-sync)"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
         data = json.loads(resp.read().decode("utf-8"))
     try:
         return RemoteIndex(**data)
@@ -338,11 +341,12 @@ def fetch_index(url: str, timeout: float = 15.0) -> RemoteIndex:
 
 def install_from_entry(entry: RemoteProtocolEntry, timeout: float = 15.0) -> Path:
     """Download one protocol, verify sha256 if present, install into cache."""
+    _require_http_url(entry.url)
     req = urllib.request.Request(
         entry.url,
         headers={"User-Agent": "flipper-mcp/0.3 (+registry-sync)"},
     )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
         body = resp.read()
 
     if entry.sha256:
@@ -357,9 +361,7 @@ def install_from_entry(entry: RemoteProtocolEntry, timeout: float = 15.0) -> Pat
         proto_data = json.loads(body.decode("utf-8"))
         Protocol(**proto_data)  # validate schema
     except (ValidationError, json.JSONDecodeError) as e:
-        raise RegistryError(
-            f"Downloaded protocol {entry.id} failed validation: {e}"
-        ) from e
+        raise RegistryError(f"Downloaded protocol {entry.id} failed validation: {e}") from e
 
     if proto_data.get("id") != entry.id:
         raise RegistryError(
@@ -387,14 +389,10 @@ def installed_protocols() -> list[str]:
     cache = user_cache_dir()
     if not cache.is_dir():
         return []
-    return sorted(
-        entry.name[:-5] for entry in cache.iterdir() if entry.name.endswith(".json")
-    )
+    return sorted(entry.name[:-5] for entry in cache.iterdir() if entry.name.endswith(".json"))
 
 
 def bundled_protocols() -> list[str]:
     """List protocol IDs shipped with the package."""
     pkg = importlib.resources.files("flipper_mcp") / "protocols"
-    return sorted(
-        entry.name[:-5] for entry in pkg.iterdir() if entry.name.endswith(".json")
-    )
+    return sorted(entry.name[:-5] for entry in pkg.iterdir() if entry.name.endswith(".json"))
