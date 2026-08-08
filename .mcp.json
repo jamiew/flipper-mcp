@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "flipper": {
+      "type": "stdio",
+      "command": "uv",
+      "args": ["run", "--no-sync", "flipper-mcp"]
+    }
+  }
+}

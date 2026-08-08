@@ -22,20 +22,26 @@ Not done yet -- the 1.x API works and the import is the only coupling.
 
 ## Install for Claude Code (project scope)
 
-`.mcp.json` in the repo root registers the server for this directory only:
+`.mcp.json` in the repo root registers the server for this directory only. It
+launches via `uv run --no-sync` so it carries no absolute path and is safe to
+commit:
 
 ```json
 {
   "mcpServers": {
     "flipper": {
       "type": "stdio",
-      "command": "/absolute/path/to/.venv/bin/flipper-mcp"
+      "command": "uv",
+      "args": ["run", "--no-sync", "flipper-mcp"]
     }
   }
 }
 ```
 
-Claude Code prompts once to approve a project-scoped server, then exposes the
+`--no-sync` reuses the existing `.venv` instead of reconciling deps on every
+launch (plain `uv run` uninstalls/reinstalls to match `pyproject`, stripping dev
+tools like ruff each time). Run `make install` once to create the venv. Claude
+Code prompts once to approve a project-scoped server, then exposes the
 `mcp__flipper__*` tools whenever you work in this dir.
 
 ## Smoke-testing without hardware

@@ -75,30 +75,29 @@ flipper-smoke
 
 ## Wire into Claude Code
 
-**Project scope** (only this repo, config committed to `.mcp.json`):
+This repo ships a project-scoped `.mcp.json`. After `make install` (or
+`uv pip install -e .`), Claude Code prompts once to approve the server, then the
+`mcp__flipper__*` tools are available whenever you work in this directory.
 
-```bash
-claude mcp add --scope project flipper "$(pwd)/.venv/bin/flipper-mcp"
-```
-
-This writes `.mcp.json` in the repo root. On next launch Claude Code prompts you
-once to approve the project server; after that the `mcp__flipper__*` tools are
-available whenever you work in this directory.
-
-**User scope** (all your projects) — swap `--scope project` for `--scope user`.
-
-If the CLI can't write the config (sandbox/permissions), create `.mcp.json` by hand:
+The committed config launches via `uv run --no-sync`, so it needs no absolute
+path and works for anyone who cloned the repo:
 
 ```json
 {
   "mcpServers": {
     "flipper": {
       "type": "stdio",
-      "command": "/absolute/path/to/flipper-mcp/.venv/bin/flipper-mcp"
+      "command": "uv",
+      "args": ["run", "--no-sync", "flipper-mcp"]
     }
   }
 }
 ```
+
+`--no-sync` runs in the existing `.venv` without reconciling deps on every
+launch (so it won't fight your dev tooling). Create the venv first with
+`make install`. For a **user-scoped** install across all projects:
+`claude mcp add --scope user flipper "$(pwd)/.venv/bin/flipper-mcp"`.
 
 Smoke-test the server without hardware (lists all tools over stdio):
 
