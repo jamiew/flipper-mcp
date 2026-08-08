@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from flipper_mcp.registry import classify_file
 
-
 SUBGHZ_RAW = """Filetype: Flipper SubGhz RAW File
 Version: 1
 Frequency: 315000000

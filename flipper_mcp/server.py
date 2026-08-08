@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import atexit
 import os
-from typing import Optional
 
 from mcp.server.fastmcp import FastMCP
 
@@ -49,7 +48,7 @@ mcp = FastMCP("flipper")
 # Override on a per-user basis by exporting FLIPPER_DEFAULT_DEVICE=1.
 _DEFAULT_DEVICE = int(os.environ.get("FLIPPER_DEFAULT_DEVICE", "0"))
 
-_bridge: Optional[FlipperBridge] = None
+_bridge: FlipperBridge | None = None
 
 
 def _get_bridge() -> FlipperBridge:
@@ -138,7 +137,7 @@ def storage_stat(path: str) -> str:
 def subghz_rx(
     frequency_hz: int,
     duration_s: float = 10.0,
-    device: Optional[int] = None,
+    device: int | None = None,
 ) -> str:
     """Listen on SubGHz for `duration_s` seconds and return captured signals.
 
@@ -177,9 +176,7 @@ def subghz_decode_raw(sub_file_path: str, duration_s: float = 15.0) -> str:
     prints any hits. That means this tool takes at least as long as the
     original capture (bounded here by ``duration_s``, default 15s).
     """
-    return _get_bridge().stream(
-        f"subghz decode_raw {sub_file_path}", duration=duration_s
-    )
+    return _get_bridge().stream(f"subghz decode_raw {sub_file_path}", duration=duration_s)
 
 
 # -- NFC / RFID -------------------------------------------------------------
@@ -318,7 +315,7 @@ def subghz_rx_raw(frequency_hz: int, duration_s: float = 10.0) -> str:
 def subghz_chat(
     frequency_hz: int = 433920000,
     duration_s: float = 30.0,
-    device: Optional[int] = None,
+    device: int | None = None,
 ) -> str:
     """Listen on SubGHz chat mode — receive broadcast messages from other Flippers."""
     dev = device if device is not None else _DEFAULT_DEVICE
@@ -585,10 +582,7 @@ def ir_universal_list(category: str) -> str:
     """
     cat = category.lower().strip()
     if cat not in _UNIVERSAL_CATEGORIES:
-        return (
-            f"error: unknown category {category!r}. "
-            f"Valid: {sorted(_UNIVERSAL_CATEGORIES)}."
-        )
+        return f"error: unknown category {category!r}. Valid: {sorted(_UNIVERSAL_CATEGORIES)}."
     return _get_bridge().send(f"ir universal list {cat}")
 
 
@@ -606,10 +600,7 @@ def ir_universal_send(category: str, button: str) -> str:
     """
     cat = category.lower().strip()
     if cat not in _UNIVERSAL_CATEGORIES:
-        return (
-            f"error: unknown category {category!r}. "
-            f"Valid: {sorted(_UNIVERSAL_CATEGORIES)}."
-        )
+        return f"error: unknown category {category!r}. Valid: {sorted(_UNIVERSAL_CATEGORIES)}."
     return _get_bridge().send(f"ir universal send {cat} {button}")
 
 
@@ -618,8 +609,8 @@ def ir_universal_send(category: str, button: str) -> str:
 
 @mcp.tool()
 def registry_list(
-    category: Optional[str] = None,
-    pack: Optional[str] = None,
+    category: str | None = None,
+    pack: str | None = None,
 ) -> list[dict]:
     """List known protocols in the bundled registry.
 
@@ -655,7 +646,7 @@ def registry_describe(protocol_id: str) -> dict:
 def scan_and_identify(
     frequency_hz: int,
     duration_s: float = 15.0,
-    device: Optional[int] = None,
+    device: int | None = None,
 ) -> dict:
     """Listen on SubGHz, then fingerprint the capture against the registry.
 
@@ -778,8 +769,7 @@ def registry_remove(protocol_id: str) -> dict:
         return {"removed": protocol_id}
     return {
         "error": (
-            f"'{protocol_id}' is not in the user cache. "
-            "Bundled-only protocols cannot be removed."
+            f"'{protocol_id}' is not in the user cache. Bundled-only protocols cannot be removed."
         )
     }
 

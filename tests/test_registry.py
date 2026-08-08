@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from flipper_mcp.registry import Registry, get_registry
 
-
 # Synthetic samples that mimic Flipper CLI output for each protocol. These
 # are intentionally permissive — real captures will have more noise around
 # them — but they exercise the regex patterns.
@@ -151,8 +150,7 @@ def test_fingerprint_ignores_keystore_preamble():
     )
     matches = r.fingerprint(preamble_only, category="subghz")
     assert matches == [], (
-        f"preamble should not fingerprint to any protocol, got: "
-        f"{[m.protocol.id for m in matches]}"
+        f"preamble should not fingerprint to any protocol, got: {[m.protocol.id for m in matches]}"
     )
 
 
@@ -163,11 +161,7 @@ def test_fingerprint_hormann():
     r = get_registry()
     sample = "Decoded: Hormann HSM4\nKey: 0xABCDEF\nSn: 0x123\nCnt: 0x5"
     hit = next(
-        (
-            m
-            for m in r.fingerprint(sample, category="subghz")
-            if m.protocol.id == "hormann-hsm"
-        ),
+        (m for m in r.fingerprint(sample, category="subghz") if m.protocol.id == "hormann-hsm"),
         None,
     )
     assert hit is not None
@@ -178,11 +172,7 @@ def test_fingerprint_security_plus_2():
     r = get_registry()
     sample = "Decoded: Security+ 2.0\nFix: 0xCAFE\nHop: 0xBEEF\nSn: 0x1234\nCnt: 0x0001"
     hit = next(
-        (
-            m
-            for m in r.fingerprint(sample, category="subghz")
-            if m.protocol.id == "security-plus-2"
-        ),
+        (m for m in r.fingerprint(sample, category="subghz") if m.protocol.id == "security-plus-2"),
         None,
     )
     assert hit is not None
@@ -207,11 +197,7 @@ def test_fingerprint_em4100():
     r = get_registry()
     sample = "Read EM4100\nID: 0A B1 C2 D3 E4"
     hit = next(
-        (
-            m
-            for m in r.fingerprint(sample, category="lfrfid")
-            if m.protocol.id == "em4100"
-        ),
+        (m for m in r.fingerprint(sample, category="lfrfid") if m.protocol.id == "em4100"),
         None,
     )
     assert hit is not None
@@ -222,11 +208,7 @@ def test_fingerprint_ht12():
     r = get_registry()
     sample = "Decoded: HT12E\nAddress: 0x3F\nData: 0x05\nKey: 0x3F05"
     hit = next(
-        (
-            m
-            for m in r.fingerprint(sample, category="subghz")
-            if m.protocol.id == "ht12"
-        ),
+        (m for m in r.fingerprint(sample, category="subghz") if m.protocol.id == "ht12"),
         None,
     )
     assert hit is not None

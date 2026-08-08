@@ -24,11 +24,11 @@ from flipper_mcp import registry as reg_mod
 from flipper_mcp.registry import (
     Registry,
     RegistryError,
+    RemoteIndex,
+    RemoteProtocolEntry,
     fetch_index,
     install_from_entry,
     uninstall_from_cache,
-    RemoteIndex,
-    RemoteProtocolEntry,
 )
 
 

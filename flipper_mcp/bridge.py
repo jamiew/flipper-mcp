@@ -19,6 +19,7 @@ Design notes:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import glob
 import os
 import platform
@@ -26,7 +27,6 @@ import re
 import sys
 import threading
 import time
-from typing import Optional
 
 import serial
 
@@ -48,7 +48,7 @@ class FlipperBridge:
 
     def __init__(
         self,
-        port: Optional[str] = None,
+        port: str | None = None,
         baudrate: int = 115200,
         read_timeout: float = 0.05,
     ) -> None:
@@ -75,9 +75,7 @@ class FlipperBridge:
         self._buf = bytearray()
         self._lock = threading.Lock()
         self._stop = threading.Event()
-        self._reader = threading.Thread(
-            target=self._read_loop, name="flipper-reader", daemon=True
-        )
+        self._reader = threading.Thread(target=self._read_loop, name="flipper-reader", daemon=True)
         self._reader.start()
         self._handshake()
 
@@ -157,7 +155,7 @@ class FlipperBridge:
     # -- cleanup ------------------------------------------------------------
 
     @staticmethod
-    def _clean(raw: bytes, cmd: Optional[str] = None) -> str:
+    def _clean(raw: bytes, cmd: str | None = None) -> str:
         text = raw.decode("utf-8", errors="replace")
         text = ANSI_RE.sub("", text)
         text = text.replace("\r\n", "\n").replace("\r", "\n")
@@ -188,12 +186,10 @@ class FlipperBridge:
 
     def close(self) -> None:
         self._stop.set()
-        try:
+        with contextlib.suppress(Exception):
             self._ser.close()
-        except Exception:
-            pass
 
-    def __enter__(self) -> "FlipperBridge":
+    def __enter__(self) -> FlipperBridge:
         return self
 
     def __exit__(self, *exc: object) -> None:

@@ -32,7 +32,6 @@ from .registry import (
     user_cache_dir,
 )
 
-
 # -- helpers ----------------------------------------------------------------
 
 
@@ -132,8 +131,7 @@ def cmd_remove(args: argparse.Namespace) -> int:
         print(f"removed {args.protocol_id}")
         return 0
     print(
-        f"error: '{args.protocol_id}' not in user cache "
-        "(bundled protocols cannot be removed)",
+        f"error: '{args.protocol_id}' not in user cache (bundled protocols cannot be removed)",
         file=sys.stderr,
     )
     return 1
@@ -176,9 +174,7 @@ def main(argv: list[str] | None = None) -> int:
     p_describe = sub.add_parser("describe", help="Show full entry for one protocol")
     p_describe.add_argument("protocol_id")
 
-    p_index = sub.add_parser(
-        "index", help="Fetch a remote registry index and list its entries"
-    )
+    p_index = sub.add_parser("index", help="Fetch a remote registry index and list its entries")
     p_index.add_argument("url")
 
     p_install = sub.add_parser(
@@ -187,9 +183,7 @@ def main(argv: list[str] | None = None) -> int:
     p_install.add_argument("url")
     p_install.add_argument("protocol_id")
 
-    p_remove = sub.add_parser(
-        "remove", help="Remove a user-installed protocol from the cache"
-    )
+    p_remove = sub.add_parser("remove", help="Remove a user-installed protocol from the cache")
     p_remove.add_argument("protocol_id")
 
     p_validate = sub.add_parser(

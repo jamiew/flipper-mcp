@@ -55,9 +55,7 @@ def normalize_key(key: str) -> str:
         return k
     if k in _KEY_ALIASES:
         return _KEY_ALIASES[k]
-    raise UIError(
-        f"Unknown Flipper input key: {key!r}. Use one of {sorted(_CANONICAL_KEYS)}."
-    )
+    raise UIError(f"Unknown Flipper input key: {key!r}. Use one of {sorted(_CANONICAL_KEYS)}.")
 
 
 # -- single-key helpers ----------------------------------------------------
@@ -72,8 +70,7 @@ def press_key(bridge: FlipperBridge, key: str, press_type: str = "short") -> str
     canonical = normalize_key(key)
     if press_type not in {"short", "long", "press", "release"}:
         raise UIError(
-            f"Unknown press type: {press_type!r}. "
-            "Use 'short' | 'long' | 'press' | 'release'."
+            f"Unknown press type: {press_type!r}. Use 'short' | 'long' | 'press' | 'release'."
         )
     return bridge.send(f"input send {canonical} {press_type}")
 
