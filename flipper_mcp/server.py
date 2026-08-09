@@ -30,6 +30,7 @@ from .registry import (
     uninstall_from_cache,
     user_cache_dir,
 )
+from .safety import check_tx_frequency, gate_raw_command, require_tx
 from .ui import (
     close_any_running_app,
     hold_key,
@@ -104,6 +105,7 @@ def flipper_cli(command: str, timeout_s: float = 10.0) -> str:
     (subghz rx, ir rx, nfc detect) prefer the dedicated tool — it handles
     the Ctrl-C for you.
     """
+    gate_raw_command(command)
     return _get_bridge().send(command, timeout=timeout_s)
 
 
@@ -176,6 +178,7 @@ def subghz_tx_from_file(sub_file_path: str) -> str:
 
     Example path: /ext/subghz/garage.sub
     """
+    require_tx("subghz tx")
     return _get_bridge().send(f"subghz tx_from_file {sub_file_path}", timeout=30.0)
 
 
@@ -225,6 +228,7 @@ def ir_tx(protocol: str, address: str, command: str) -> str:
     this returns "failed to load external command", refresh the firmware
     via qFlipper to update the external CLI plugins.
     """
+    require_tx("ir tx")
     return _get_bridge().send(f"ir tx {protocol} {_hex_arg(address)} {_hex_arg(command)}")
 
 
@@ -327,7 +331,12 @@ def subghz_chat(
     duration_s: float = 30.0,
     device: int | None = None,
 ) -> str:
-    """Listen on SubGHz chat mode — receive broadcast messages from other Flippers."""
+    """Listen on SubGHz chat mode — receive broadcast messages from other Flippers.
+
+    This mode also transmits, so it is gated behind FLIPPER_ENABLE_TX.
+    """
+    require_tx("subghz chat")
+    check_tx_frequency(frequency_hz)
     dev = device if device is not None else _DEFAULT_DEVICE
     return _get_bridge().stream(f"subghz chat {frequency_hz} {dev}", duration_s)
 
@@ -611,6 +620,7 @@ def ir_universal_send(category: str, button: str) -> str:
     cat = category.lower().strip()
     if cat not in _UNIVERSAL_CATEGORIES:
         return f"error: unknown category {category!r}. Valid: {sorted(_UNIVERSAL_CATEGORIES)}."
+    require_tx("ir universal send")
     return _get_bridge().send(f"ir universal send {cat} {button}")
 
 
