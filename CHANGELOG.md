@@ -5,6 +5,27 @@
 Forked from [Str1ck9/flipper-mcp](https://github.com/Str1ck9/flipper-mcp) at
 v0.5.0 to harden it and grow the tool surface. See [`docs/`](docs/).
 
+### 10 new tools (emulation, write, power, clock, bus)
+
+- `nfc_emulate`, `rfid_write`, `rfid_emulate`, `ibutton_write`, `ibutton_emulate`
+  (the write-half of the clone workflow), plus `power`, `power_info`,
+  `datetime_get`/`datetime_set`, `i2c_scan`. All over the existing CLI, no new
+  transport. Tool count 55 to 65.
+
+### Safety gate on transmit
+
+- New `flipper_mcp/safety.py`: transmit/emulate/destructive commands raise unless
+  `FLIPPER_ENABLE_TX` is set, including via the `flipper_cli` escape hatch. SubGHz
+  TX frequencies checked against an ISM allow-list. Off by default.
+
+### Bridge fixes
+
+- Command completion now waits for the CLI prompt to reappear, not just a
+  300ms silence, so slow commands (`storage_md5`, `subghz tx_from_file`) no
+  longer return truncated on their instant echo.
+- A dead serial port (unplug/reset) is now detected and the singleton is torn
+  down so the next call reconnects, instead of writing to a dead handle forever.
+
 ### `ir_tx` leading-zero fix
 
 - `ir_tx` normalized hex with `lstrip("0x")`, which strips a charset not a

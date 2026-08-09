@@ -122,6 +122,16 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
 }
 ```
 
+## Safety
+
+Transmit, emulation, and destructive commands are off by default. They raise
+unless you set `FLIPPER_ENABLE_TX=1` (read fresh per call, so you can toggle it
+without restarting). This covers `ir_tx`, `subghz` TX, `nfc`/`rfid`/`ibutton`
+emulate + write, `power off`/`reboot`, and the same commands sent through the
+`flipper_cli` escape hatch. SubGHz TX frequencies are checked against an ISM
+allow-list in `flipper_mcp/safety.py`; narrow `TX_BANDS` to your region. You are
+responsible for legal, authorized use.
+
 ## Tool surface
 
 ### Device
@@ -154,10 +164,18 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
 | `subghz_decode_raw(sub_file_path, duration_s)` | Decode a raw capture |
 | `subghz_chat(frequency_hz, duration_s, device)` | Flipper-to-Flipper chat receive |
 | `nfc_detect(duration_s)` | Scan for NFC tags |
+| `nfc_emulate(file_path, duration_s)` | Emulate a saved `.nfc` tag *(gated)* |
 | `rfid_read(duration_s)` | Scan 125 kHz LF-RFID |
+| `rfid_write(key_type, key_data)` | Write an LF-RFID tag *(gated)* |
+| `rfid_emulate(key_type, key_data, duration_s)` | Emulate an LF-RFID tag *(gated)* |
 | `ibutton_read(duration_s)` | Scan iButton / 1-Wire |
+| `ibutton_write(key_data)` | Write a Dallas iButton key *(gated)* |
+| `ibutton_emulate(key_type, key_data, duration_s)` | Emulate an iButton key *(gated)* |
 | `ir_rx(duration_s)` | Listen for IR |
-| `ir_tx(protocol, address, command)` | Transmit an IR command |
+| `ir_tx(protocol, address, command)` | Transmit an IR command *(gated)* |
+
+Tools marked *(gated)* transmit or emulate and only run when `FLIPPER_ENABLE_TX`
+is set (see [Safety](#safety)).
 
 ### GPIO
 | Tool | Purpose |
@@ -165,6 +183,14 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
 | `gpio_read(pin)` | Read digital state of a GPIO pin |
 | `gpio_write(pin, value)` | Drive a pin high/low |
 | `gpio_mode(pin, mode)` | Configure pin direction |
+
+### Power / clock / bus
+| Tool | Purpose |
+|---|---|
+| `power(action)` | `off` / `reboot` / `reboot2dfu` *(gated)*, or `otg_on` / `otg_off` (5V pin) |
+| `power_info()` | Battery / charging / power state |
+| `datetime_get()` / `datetime_set(iso)` | Read / set the real-time clock |
+| `i2c_scan()` | Scan the GPIO I2C bus for responding addresses |
 
 ### App control / introspection
 | Tool | Purpose |

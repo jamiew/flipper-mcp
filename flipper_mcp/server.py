@@ -14,11 +14,13 @@ the server run without a Flipper attached.
 from __future__ import annotations
 
 import atexit
+import contextlib
 import os
+from datetime import datetime as _datetime
 
 from mcp.server.fastmcp import FastMCP
 
-from .bridge import FlipperBridge
+from .bridge import FlipperBridge, FlipperError
 from .registry import (
     bundled_protocols,
     classify_file,
@@ -203,6 +205,18 @@ def nfc_detect(duration_s: float = 5.0) -> str:
     return _get_bridge().stream("nfc detect", duration_s)
 
 
+@mcp.tool()
+def nfc_emulate(file_path: str = "", duration_s: float = 15.0) -> str:
+    """Emulate a saved .nfc tag (or the last-read tag if no path) for a duration.
+
+    Gated behind FLIPPER_ENABLE_TX. Pass a path like /ext/nfc/mycard.nfc, or
+    leave empty on firmwares that emulate the last-read tag.
+    """
+    require_tx("nfc emulate")
+    cmd = f"nfc emulate {file_path}".strip()
+    return _get_bridge().stream(cmd, duration_s)
+
+
 # -- Infrared ---------------------------------------------------------------
 
 
@@ -251,6 +265,62 @@ def free() -> str:
 def uptime() -> str:
     """Show how long the Flipper has been running since last boot."""
     return _get_bridge().send("uptime")
+
+
+@mcp.tool()
+def power(action: str) -> str:
+    """Control device power. action: off | reboot | reboot2dfu | otg_on | otg_off.
+
+    off/reboot/reboot2dfu are destructive and gated behind FLIPPER_ENABLE_TX; they
+    drop the USB link, so this returns a best-effort note. otg_on/otg_off toggle
+    the 5V pin for powering external boards.
+    """
+    verbs = {
+        "off": "power off",
+        "reboot": "power reboot",
+        "reboot2dfu": "power reboot2dfu",
+        "otg_on": "power 5v 1",
+        "otg_off": "power 5v 0",
+    }
+    cmd = verbs.get(action)
+    if cmd is None:
+        return f"error: unknown action {action!r}. Valid: {sorted(verbs)}."
+    if action in ("off", "reboot", "reboot2dfu"):
+        require_tx(f"power {action}")
+        with contextlib.suppress(FlipperError):
+            _get_bridge().send(cmd)  # the link drops as the device powers down; expected
+        return f"sent '{cmd}'; the device is powering down and the USB link will drop."
+    return _get_bridge().send(cmd)
+
+
+@mcp.tool()
+def power_info() -> str:
+    """Show battery / charging / power state (voltage, current, temperature, health)."""
+    out = _get_bridge().send("info power")
+    return out if out.strip() else _get_bridge().send("power info")
+
+
+@mcp.tool()
+def datetime_get() -> str:
+    """Read the Flipper's real-time clock."""
+    return _get_bridge().send("date")
+
+
+@mcp.tool()
+def datetime_set(iso: str) -> str:
+    """Set the Flipper's clock from an ISO timestamp, e.g. 2026-08-09T14:30:00.
+
+    Handy so captures get correct timestamps. Defaults to now if `iso` is empty.
+    """
+    dt = _datetime.fromisoformat(iso) if iso else _datetime.now()
+    stamp = dt.strftime("%Y-%m-%d %H:%M:%S") + f" {dt.isoweekday()}"
+    return _get_bridge().send(f"date {stamp}")
+
+
+@mcp.tool()
+def i2c_scan() -> str:
+    """Scan the GPIO I2C bus (PC0=SCL, PC1=SDA) and report responding addresses."""
+    return _get_bridge().send("i2c")
 
 
 @mcp.tool()
@@ -354,9 +424,49 @@ def rfid_read(duration_s: float = 10.0) -> str:
 
 
 @mcp.tool()
+def rfid_write(key_type: str, key_data: str) -> str:
+    """Write a 125 kHz LF-RFID tag. key_type: EM4100 | H10301 | Indala26.
+
+    Gated behind FLIPPER_ENABLE_TX. key_data is the hex ID as shown by rfid_read.
+    """
+    require_tx("rfid write")
+    return _get_bridge().send(f"rfid write {key_type} {key_data}")
+
+
+@mcp.tool()
+def rfid_emulate(key_type: str, key_data: str, duration_s: float = 15.0) -> str:
+    """Emulate a 125 kHz LF-RFID tag for a duration. Gated behind FLIPPER_ENABLE_TX.
+
+    key_type: EM4100 | H10301 | Indala26. key_data: hex ID from rfid_read.
+    """
+    require_tx("rfid emulate")
+    return _get_bridge().stream(f"rfid emulate {key_type} {key_data}", duration_s)
+
+
+@mcp.tool()
 def ibutton_read(duration_s: float = 10.0) -> str:
     """Scan for iButton / 1-Wire keys for `duration_s` seconds."""
     return _get_bridge().stream("ikey read", duration_s)
+
+
+@mcp.tool()
+def ibutton_write(key_data: str) -> str:
+    """Write a Dallas iButton key (only Dallas is writable). Gated behind FLIPPER_ENABLE_TX.
+
+    key_data: the 8-byte hex ID as shown by ibutton_read.
+    """
+    require_tx("ikey write")
+    return _get_bridge().send(f"ikey write Dallas {key_data}")
+
+
+@mcp.tool()
+def ibutton_emulate(key_type: str, key_data: str, duration_s: float = 15.0) -> str:
+    """Emulate an iButton key for a duration. Gated behind FLIPPER_ENABLE_TX.
+
+    key_type: Dallas (8B) | Cyfral (2B) | Metakom (4B). key_data: hex from ibutton_read.
+    """
+    require_tx("ikey emulate")
+    return _get_bridge().stream(f"ikey emulate {key_type} {key_data}", duration_s)
 
 
 # -- GPIO (v0.4) -----------------------------------------------------------
