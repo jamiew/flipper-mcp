@@ -75,6 +75,8 @@ class FlipperBridge:
         self._buf = bytearray()
         self._lock = threading.Lock()
         self._stop = threading.Event()
+        self._alive = threading.Event()
+        self._alive.set()
         self._reader = threading.Thread(target=self._read_loop, name="flipper-reader", daemon=True)
         self._reader.start()
         self._handshake()
@@ -104,13 +106,18 @@ class FlipperBridge:
         while not self._stop.is_set():
             try:
                 data = self._ser.read(4096)
-            except serial.SerialException:
-                break
-            except OSError:
+            except (serial.SerialException, OSError):
+                # Port went away (unplug, reset). Mark dead so the next call
+                # tears down the stale singleton and reconnects.
+                self._alive.clear()
                 break
             if data:
                 with self._lock:
                     self._buf.extend(data)
+
+    @property
+    def alive(self) -> bool:
+        return self._alive.is_set()
 
     def _drain(self) -> None:
         with self._lock:
@@ -126,16 +133,33 @@ class FlipperBridge:
         with self._lock:
             return len(self._buf)
 
+    def _ends_with_prompt(self) -> bool:
+        """True when the buffer tail is the CLI prompt, i.e. a command finished."""
+        with self._lock:
+            tail = bytes(self._buf[-64:])
+        return ANSI_RE.sub("", tail.decode("utf-8", errors="replace")).rstrip().endswith(PROMPT)
+
     # -- writing ------------------------------------------------------------
 
     def _write(self, payload: str) -> None:
-        self._ser.write(payload.encode("utf-8"))
-        self._ser.flush()
+        try:
+            self._ser.write(payload.encode("utf-8"))
+            self._ser.flush()
+        except (serial.SerialException, OSError) as e:
+            self._alive.clear()
+            raise FlipperError(f"Lost the Flipper serial link: {e}") from e
 
     # -- waiting ------------------------------------------------------------
 
     def _wait_quiet(self, timeout: float, quiet_ms: int) -> None:
-        """Block until the buffer has been silent for `quiet_ms`, or timeout."""
+        """Block until the command settles, or timeout.
+
+        Settled means the CLI prompt has reappeared at the buffer tail (the
+        real completion signal), or, as a fallback for commands that don't
+        return a prompt, the buffer has been silent for `quiet_ms`. Waiting on
+        the prompt stops slow commands (storage_md5, tx_from_file) from being
+        cut off by the quiet timer firing on the instant command echo.
+        """
         quiet_s = quiet_ms / 1000.0
         deadline = time.monotonic() + timeout
         last_size = self._peek_size()
@@ -143,6 +167,8 @@ class FlipperBridge:
 
         while time.monotonic() < deadline:
             time.sleep(0.02)
+            if self._ends_with_prompt():
+                return
             size = self._peek_size()
             now = time.monotonic()
             if size != last_size:

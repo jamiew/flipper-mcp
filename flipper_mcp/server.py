@@ -53,6 +53,8 @@ _bridge: FlipperBridge | None = None
 
 def _get_bridge() -> FlipperBridge:
     global _bridge
+    if _bridge is not None and not _bridge.alive:
+        _close_bridge()  # port died (unplug/reset); drop it and reconnect below
     if _bridge is None:
         port = os.environ.get("FLIPPER_PORT")
         _bridge = FlipperBridge(port=port)
