@@ -1,83 +1,39 @@
 # flipper-mcp
 
-> **This is a fork** of [Str1ck9/flipper-mcp](https://github.com/Str1ck9/flipper-mcp).
-> Goal: harden it, keep it current, and grow the tool surface toward the best
-> ideas across the Flipper-MCP landscape (see [`docs/landscape.md`](docs/landscape.md)).
-> Uses the official MCP Python SDK v2, serialized USB transactions, and guarded
-> transmit tools. See [`CHANGELOG.md`](CHANGELOG.md) and the
-> [hardware validation report](docs/hardware-validation.md).
+A local MCP server for controlling a Flipper Zero over USB-CDC. Forked from
+[Str1ck9/flipper-mcp](https://github.com/Str1ck9/flipper-mcp), using the official
+MCP Python SDK v2, serialized USB transactions, and guarded transmission.
 
-An [MCP](https://modelcontextprotocol.io) server that gives an LLM hands on a
-[Flipper Zero](https://flipper.net/) over USB-CDC.
+**Resume work:** [PLAN.md](PLAN.md). **Evidence:** [hardware validation](docs/hardware-validation.md).
 
-Point Claude (or any MCP-aware agent) at a plugged-in Flipper and ask things
-like:
+## Current status
 
-> Scan 433.92 MHz for 15 seconds and tell me what you pick up.
+Checked September 22, 2026, on **Momentum mntm-012**:
 
-> What's saved in `/ext/subghz` on my Flipper?
+- 64 tools, one triage prompt, and 13 bundled protocol definitions.
+- 132 automated tests and Ruff passed. Re-invoked 63 tools after the firmware
+  update, including safety refusals, not 63 successful physical tests.
+- Storage, device controls, IR/LF-RFID/iButton/SubGHz reception, and registry
+  operations respond. Installed apps: 195.
+- JVC Power and Volume Up were captured as RAW IR. One Volume Up replay was
+  accepted by firmware; **the TV's response is unconfirmed**.
+- NFC CLI detection times out. App closure may require Back. The clock setter
+  remains untested on this firmware after an earlier USB disconnect.
+- No general Bluetooth scanner or firmware-flashing tool is exposed.
 
-> Blink the LED magenta for a second so I know you're online.
+## Setup
 
-## What this is (and isn't)
-
-**Is:** a thin, honest bridge. Every tool wraps a real Flipper CLI command.
-No cloud, no proprietary magic. Everything happens on your machine.
-
-**Isn't:** a hacking tool. It doesn't unlock anything the Flipper itself
-couldn't unlock.
-
-[![CI](https://github.com/Str1ck9/flipper-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/Str1ck9/flipper-mcp/actions/workflows/ci.yml)
-
-## Status
-
-| Layer | What | Status |
-|---|---|---|
-| **L1** | USB-CDC bridge + 64 MCP tools | Partial hardware coverage; see the validation report |
-| **L2** | Protocol registry — 13 bundled entries, regex fingerprinter, file-header classifier | ✅ working |
-| **L3** | Remote registry sync with optional SHA-256 verification | Local HTTP fixture verified; no signature authentication |
-| **UI automation** | Button input and app workflows | About launch/exit verified; NFC closure and navigation need attention |
-| **CLI** | `flipper-registry` for cache management and JSON validation | ✅ working |
-
-**Hardware checked:** Momentum mntm-010. CLI availability varies by firmware
-and installed external plugins. NFC CLI detection failed on this device;
-do not assume every exposed tool is supported. No firmware was flashed.
-
-**Bundled protocols (13):** Princeton, KeeLoq, CAME Atomo, Nice FLO, Hormann
-HSM, FAAC SLH, Security+ 2.0, HT12, TPMS (generic), NEC IR, Samsung32 IR,
-Sony SIRC, EM4100.
-
-## Install
-
-Requires a Flipper Zero and Python 3.11+.
+Requires Python 3.11+, [uv](https://docs.astral.sh/uv/), and a USB data cable.
 
 ```bash
-git clone https://github.com/Str1ck9/flipper-mcp
+git clone https://github.com/jamiew/flipper-mcp.git
 cd flipper-mcp
 uv sync --locked --extra dev
 ```
 
-Verify it sees your Flipper:
-
-```bash
-source .venv/bin/activate
-flipper-smoke
-# → connected: /dev/cu.usbmodemflip_XXXX
-# → (device_info output)
-```
-
-> **Dependency note:** requires `mcp>=2.2,<3`, using `mcp.server.MCPServer`.
-> Run `uv sync --locked --extra dev` after updating this checkout, then restart
-> the MCP process so it loads the new code. SDK v1 is no longer supported.
-
-## Wire into Oh My Pi or Claude Code
-
-This repo ships a project-scoped `.mcp.json`, verified with Oh My Pi.
-After `make install`, approve the server in your MCP client if prompted.
-It runs the local editable checkout; no second configuration file is needed.
-
-The committed config launches via `uv run --no-sync`, so it needs no absolute
-path and works for anyone who cloned the repo:
+The project `.mcp.json` runs the editable checkout in Oh My Pi or compatible
+MCP clients. Approve it in your client if prompted, and restart the server
+when dependencies or code change:
 
 ```json
 {
@@ -91,315 +47,99 @@ path and works for anyone who cloned the repo:
 }
 ```
 
-`--no-sync` runs in the existing `.venv` without reconciling deps on every
-launch (so it won't fight your dev tooling). Create the venv first with
-`make install`. For a **user-scoped** install across all projects:
-`claude mcp add --scope user flipper "$(pwd)/.venv/bin/flipper-mcp"`.
-
-Smoke-test the server without hardware (lists all tools over stdio):
-
-```bash
-printf '%s\n' \
-  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}' \
-  '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
-  '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | .venv/bin/flipper-mcp
-```
-
-## Wire into Claude Desktop
-
-Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "flipper": {
-      "command": "/absolute/path/to/flipper-mcp/.venv/bin/flipper-mcp"
-    }
-  }
-}
-```
-
-## Safety
-
-Transmit, emulation, and destructive commands are off by default. They raise
-unless the server is launched with `FLIPPER_ENABLE_TX=1`. This covers IR/RF
-transmission, SubGHz chat, credential writes/emulation, power changes, and
-equivalent raw CLI commands. Do not enable it globally just to run a sweep.
-SubGHz tools check hardware frequency windows, not legal regional permission.
-Use only authorized targets and frequencies. GPIO and storage mutations still
-require operator care. General Bluetooth scanning and flashing are not tools.
-
-## Tool surface
-
-### Device
-| Tool | Purpose |
-|---|---|
-| `flipper_info` | Firmware, hardware, UID |
-| `flipper_help` | List every CLI command the firmware supports |
-| `flipper_cli(command, timeout_s)` | Run an arbitrary CLI command (escape hatch) |
-| `ps`, `free`, `uptime` | System state |
-
-### Storage
-| Tool | Purpose |
-|---|---|
-| `storage_list(path)` | List a directory (default `/ext`) |
-| `storage_read(path)` | Read a file's contents |
-| `storage_stat(path)` | File/dir metadata |
-| `storage_info(path)` | Free / total space |
-| `storage_write(path, content)` | Write text content to a file |
-| `storage_remove(path)` | Delete a file or empty directory |
-| `storage_mkdir(path)` | Create a directory |
-| `storage_rename(old, new)` | Rename / move |
-| `storage_md5(path)` | MD5 checksum (firmware-side) |
-
-### Radio
-| Tool | Purpose |
-|---|---|
-| `subghz_rx(frequency_hz, duration_s, device)` | Listen for RF signals (decoded protocols) |
-| `subghz_rx_raw(frequency_hz, duration_s)` | **Raw pulse capture** for signals the firmware can't decode |
-| `subghz_tx_from_file(sub_file_path)` | Transmit a saved `.sub` file |
-| `subghz_decode_raw(sub_file_path, duration_s)` | Decode a raw capture |
-| `subghz_chat(frequency_hz, duration_s, device)` | Flipper-to-Flipper chat receive |
-| `nfc_detect(duration_s)` | Scan for NFC tags |
-| `nfc_emulate(file_path, duration_s)` | Emulate a saved `.nfc` tag *(gated)* |
-| `rfid_read(duration_s)` | Scan 125 kHz LF-RFID |
-| `rfid_write(key_type, key_data)` | Write an LF-RFID tag *(gated)* |
-| `rfid_emulate(key_type, key_data, duration_s)` | Emulate an LF-RFID tag *(gated)* |
-| `ibutton_read(duration_s)` | Scan iButton / 1-Wire |
-| `ibutton_write(key_data)` | Write a Dallas iButton key *(gated)* |
-| `ibutton_emulate(key_type, key_data, duration_s)` | Emulate an iButton key *(gated)* |
-| `ir_rx(duration_s)` | Listen for IR |
-| `ir_tx(protocol, address, command)` | Transmit an IR command *(gated)* |
-
-Tools marked *(gated)* transmit or emulate and only run when `FLIPPER_ENABLE_TX`
-is set (see [Safety](#safety)).
-
-### GPIO
-| Tool | Purpose |
-|---|---|
-| `gpio_read(pin)` | Read digital state of a GPIO pin |
-| `gpio_write(pin, value)` | Drive a pin high/low |
-| `gpio_mode(pin, mode)` | Configure pin direction |
-
-### Power / clock / bus
-| Tool | Purpose |
-|---|---|
-| `power(action)` | `off` / `reboot` / `reboot2dfu` / `otg_on` / `otg_off`, all gated |
-| `power_info()` | Battery / charging / power state |
-| `datetime_get()` / `datetime_set(iso)` | Read / set the real-time clock |
-| `i2c_scan()` | Scan the GPIO I2C bus for responding addresses |
-
-### App control / introspection
-| Tool | Purpose |
-|---|---|
-| `loader_open(app_path_or_id)` | Launch a built-in or external FAP on the Flipper |
-| `loader_close()` | Close the currently running app |
-| `loader_info()` | What app is running right now |
-| `loader_list()` | List built-in launchable apps |
-| `list_installed_apps()` | Enumerate `/ext/apps/*/*.fap` grouped by category |
-| `flipper_file_inspect(path)` | Classify a save file by its `Filetype:` header + metadata |
-| `flipper_interrupt()` | Send a Ctrl-C to recover from a stuck streaming command |
-
-### UI automation (v0.5)
-| Tool | Purpose |
-|---|---|
-| `flipper_press_key(key, press_type)` | Send a single synthetic keypress (short/long/press/release) |
-| `flipper_hold_key(key, duration_s)` | Press and hold for a wall-clock duration |
-| `flipper_input_sequence(sequence)` | Run a mini-DSL like `"ok,down,long:ok,wait:0.3,back"` |
-| `workflow_subghz_read_start()` | Launch Sub-GHz + navigate into Read (one tool call) |
-| `workflow_nfc_read_start()` | Launch NFC + navigate into Read |
-| `workflow_infrared_learn_start()` | Launch Infrared + navigate into Learn |
-| `workflow_close_app()` | Close any running app (returns Flipper to main screen) |
-| `ir_universal_list(category)` | List universal buttons; use firmware names such as `tv`, `audio`, `ac`, `fans` |
-| `ir_universal_send(category, button)` | Transmit a universal-remote button from the firmware's DB |
-
-### Physical
-| Tool | Purpose |
-|---|---|
-| `led(r, g, b)` | Set the RGB LED (0–255 each) |
-| `vibro(on)` | Pulse the motor |
-
-### Registry (L2)
-| Tool | Purpose |
-|---|---|
-| `registry_list(category, pack)` | Browse known protocols |
-| `registry_describe(protocol_id)` | Full entry for one protocol |
-| `scan_and_identify(frequency_hz, duration_s, device)` | Capture + fingerprint in one step |
-| `ir_scan_and_identify(duration_s)` | Same, for IR |
-
-### Remote registry sync (L3)
-| Tool | Purpose |
-|---|---|
-| `registry_status` | Show bundled + installed protocols, cache location |
-| `registry_fetch_index(index_url)` | List protocols available in a remote index |
-| `registry_install(index_url, protocol_id)` | Download, SHA-256 verify, install into user cache |
-| `registry_remove(protocol_id)` | Remove a user-installed protocol |
-
-### CLI
-
-The same surface is exposed as a shell command for humans:
+Run the client from this checkout. For a desktop client launched elsewhere,
+use the absolute path to `.venv/bin/flipper-mcp` as its stdio command.
+Only one process should own the Flipper's serial port. Close qFlipper or
+Flipper Lab before connecting. For a standalone hardware check, with the MCP
+server disconnected:
 
 ```bash
-flipper-registry status
-flipper-registry list --pack garage
-flipper-registry describe princeton
-flipper-registry index https://example.com/index.json
-flipper-registry install https://example.com/index.json <protocol-id>
-flipper-registry remove <protocol-id>
-flipper-registry validate my-new-protocol.json
+uv run --no-sync flipper-smoke
 ```
 
-## The registry
+## Safety and limits
 
-Protocol definitions live in [`flipper_mcp/protocols/`](flipper_mcp/protocols/)
-as individual JSON files. Each entry documents the protocol's typical
-frequencies, modulation, fingerprint patterns (regexes matched against the
-Flipper's decoded-signal output), expected devices, and a plain-English
-security note.
+Transmission, emulation, credential writes, and destructive commands are
+**disabled by default**, including equivalent raw CLI commands. They require
+`FLIPPER_ENABLE_TX=1` in the server process. Enable it only for a specific,
+authorized operation, then end that process. Do not add it permanently to
+`.mcp.json` or enable it merely to run a sweep.
 
-Ships with 13 entries covering common SubGHz / IR / RFID protocols.
-Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the
-schema, sample capture workflow, and PR checklist.
+SubGHz frequency checks enforce hardware windows, not legal permission.
+Storage writes, GPIO changes, and app navigation still need operator care.
+Reader modes may energize LF-RFID/NFC tags. A capture is not proof of a working
+copy, and rolling codes should not be treated as replayable static commands.
 
-### Remote index format
+## Tools
 
-`registry_fetch_index` / `flipper-registry index <URL>` expects a JSON file
-shaped like:
+Use your MCP client's tool list for exact arguments. The
+[coverage table](docs/hardware-validation.md#tool-coverage) names every tool
+and distinguishes data, command acceptance, receiver checks, and failures.
 
-```jsonc
-{
-  "schema_version": 1,
-  "name": "my-flipper-registry",
-  "description": "Community-curated extra protocols",
-  "protocols": [
-    {
-      "id": "my-new-protocol",
-      "url": "https://example.com/my-new-protocol.json",
-      "sha256": "aabbcc...",         // optional; enforced if present
-      "version": 1,
-      "name": "My New Protocol",
-      "category": "subghz",
-      "packs": ["garage"]
-    }
-  ]
-}
-```
+| Area | Main operations |
+|---|---|
+| Device | Firmware, help, tasks, memory, battery, clock, raw CLI |
+| Storage | List, read/write text, stat, checksum, rename, remove, inspect captures |
+| SubGHz | Decoded/RAW reception, offline RAW decoding, registry identification; gated replay/chat |
+| Infrared | Capture/identify, decoded transmission, universal database; gated RAW CLI replay |
+| RFID/NFC/iButton | Receive/read where firmware supports it; gated writes/emulation |
+| UI | Launch apps, inspect running app, button input, capture workflows |
+| GPIO | Pin mode/read/write and I2C scan |
+| Registry | Browse, describe, fetch, install, remove, validate |
 
-Install path (one entry): `$XDG_DATA_HOME/flipper-mcp/protocols/<id>.json`
-or `~/.local/share/flipper-mcp/protocols/<id>.json`. User-cached entries
-override bundled entries with the same `id`.
+UI workflows send navigation inputs; they cannot verify the selected screen.
+Check `loader_info` and the physical display. Bluetooth `bt hci_info` returns
+controller metadata, not nearby devices.
 
-### Schema
+For an external CC1101, pass `device=1` to supported SubGHz receive tools or
+set `FLIPPER_DEFAULT_DEVICE=1`. RAW reception uses the internal radio.
 
-```jsonc
-{
-  "id": "princeton",
-  "name": "Princeton PT2262/PT2260/EV1527",
-  "category": "subghz",                        // subghz | ir | nfc | lfrfid | ble
-  "typical_frequencies_hz": [315000000, 433920000],
-  "modulation": "OOK",
-  "typical_bit_rate": 2000,
-  "fingerprint": {
-    "regex_patterns": ["Princeton", "PT2262", "EV1527"],
-    "bit_length_range": [24, 25]
-  },
-  "decoder": {
-    "fields": {
-      "key": {"regex": "Key:\\s*(0x[0-9a-fA-F]+)"},
-      "bit": {"regex": "Bit:\\s*(\\d+)"}
-    }
-  },
-  "typical_devices": ["garage door openers", "simple remote switches"],
-  "security_notes": "Fixed-code. Trivially replayable.",
-  "references": ["https://en.wikipedia.org/wiki/..."],
-  "packs": ["garage"]
-}
-```
+## Protocol registry
 
-## External CC1101 module
-
-If you have an external CC1101 plugged into the GPIO header (better range, a
-second antenna path), pass `device=1` to `subghz_rx` / `scan_and_identify`
-for a single call, or export an env var to make it the default:
+Definitions in [flipper_mcp/protocols](flipper_mcp/protocols) match decoded
+text and classify saved files. They do not add firmware radio decoders.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the schema and capture requirements.
 
 ```bash
-export FLIPPER_DEFAULT_DEVICE=1
+uv run --no-sync flipper-registry status
+uv run --no-sync flipper-registry list --pack garage
+uv run --no-sync flipper-registry describe princeton
+uv run --no-sync flipper-registry validate path/to/protocol.json
 ```
 
-Unset or `0` uses the Flipper's internal CC1101.
+Remote indexes contain `schema_version: 1`, a `name`, and a `protocols` list
+with each entry's `id`, `name`, `category`, `url`, `version`, and optional
+`sha256`/`packs`. A supplied SHA-256 is checked, but is not publisher
+authentication. Cached entries override bundled entries with the same ID
+under `$XDG_DATA_HOME/flipper-mcp/protocols` or
+`~/.local/share/flipper-mcp/protocols`.
 
 ## Troubleshooting
 
-**"Flipper port is busy — another app has it open"**
-Close the **Flipper Lab** tab in Chrome (`lab.flipper.net` uses Web Serial
-and takes an exclusive lock), quit qFlipper, or kill any `screen` / `tio`
-sessions on the port.
+- **Port busy:** close the other USB client; do not run two MCP processes.
+- **No device:** check the data cable, unlock the device, and run
+  `uv run --no-sync python -m serial.tools.list_ports`.
+- **No decoded signal:** try a nearby known transmitter during the capture
+  window. RAW pulses alone do not identify a protocol.
+- **Plugin load failure:** check firmware/SD asset compatibility. An app
+  working on-device does not prove its CLI command exists.
+- **App stays open:** use Back or long Back, then check `loader_info`.
+- **NFC timeout or wrong clock:** see the current limitations in
+  [PLAN.md](PLAN.md); do not repeatedly retry disruptive operations.
 
-**"No Flipper Zero detected"**
-Plug in via USB-C (**data cable**, not charge-only), unlock the Flipper
-screen, and confirm the CDC interface is enabled (it is by default).
-
-**A frequency is rejected**
-Firmware enforces regional Sub-GHz bands. Check `hardware_region_provisioned`
-in `flipper_info` output — mine is `US`, yours may differ.
-
-**Streaming commands return empty output**
-Make sure the Flipper isn't locked mid-capture, and that nothing else holds
-the port. For weak signals, extend `duration_s` and try known-good
-transmitters (car fob at close range).
-
-**"failed to load external command" on `ir`, `nfc`, `rfid`, or `ikey`**
-Recent Flipper firmware ships some CLI commands as external plugins
-(`cli_ir.fal`, `cli_nfc.fal`, `cli_rfid.fal`, etc.) under
-`/ext/apps_data/cli/plugins/`. If these plugins were left from an older
-firmware install, the ABI won't match and loading will fail even though
-the on-device apps still work. Fix: open **qFlipper**, reinstall / update
-the firmware — this refreshes the external plugins.
-
-**`scan_and_identify` returns 0 packets even though the fob works**
-The Flipper's `subghz rx` CLI only prints output when a *known* protocol
-decoder matches. Proprietary RKE (Honda, Toyota post-2013, some Fords)
-isn't in stock firmware's decoder list. Workarounds:
-
-- Use `subghz_rx_raw` to capture pulse timings regardless of decode success
-- Install a community firmware with broader decoder coverage
-  ([Momentum](https://momentum-fw.dev/),
-  [RogueMaster](https://github.com/RogueMaster/flipperzero-firmware-wPlugins),
-  [Xtreme](https://github.com/ClaraCrazy/Flipper-Xtreme))
-- Use the on-device Sub-GHz Read app (falls back to RAW save) and then
-  `flipper_file_inspect` the saved file
-
-**CLI `subghz rx` uses `Ook650Async`; on-device Read uses `Ook270Async`**
-The 650 kHz bandwidth default is looser than what the Read app uses, so
-weak OOK signals may be missed via the CLI. There's currently no way to
-switch presets via the stock CLI; planned for a future release.
-
-## Development
+## Development and reference
 
 ```bash
-uv pip install -e ".[dev]"
-pytest
+uv sync --locked --extra dev
+uv run --no-sync ruff check flipper_mcp tests
+uv run --no-sync pytest
 ```
 
-## Acknowledgements
+- [IR capture and playback](docs/ir-tv-probing.md)
+- [Transport and SDK notes](docs/dev-notes.md)
+- [Changelog](CHANGELOG.md)
+- Historical research: [landscape](docs/landscape.md),
+  [feature ideas](docs/feature-ideas.md), [opportunities](docs/opportunities.md)
 
-- [navcore.io's Pi.dev Flipper
-  article](https://blog.navcore.io/AI-Agents/Giving-a-Pi.dev-Agent-Hands-on-a-Flipper-Zero) —
-  the USB-CDC quiet-period trick is theirs, and it works.
-- [roostercoopllc/flipper-mcp](https://github.com/roostercoopllc/flipper-mcp) —
-  their ~30-tool inventory (running on an ESP32-S2 WiFi Dev Board) shaped
-  the v0.4 tool-surface expansion: storage write/remove, GPIO, loader, RFID,
-  iButton wrappers. Different architecture (wireless), same underlying
-  Flipper CLI, so the tool semantics port over one-for-one.
-- [Kinark/flipper-control-mcp](https://github.com/Kinark/flipper-control-mcp) —
-  the `input send`-driven on-device UI automation approach is theirs in
-  spirit; we adopted the idea and built the workflow macros on top.
-- [dudebot/flipper-mcp-bridge](https://github.com/dudebot/flipper-mcp-bridge) —
-  their focus on the Flipper's built-in universal-remote database inspired
-  the `ir_universal_list` / `ir_universal_send` tools.
-- The broader AI-on-Flipper landscape — FlipperClaw, V3SP3R, AgentFlipper,
-  Gemini-Flipper, OpenFlip — that set the direction.
-
-## License
-
-MIT. See [LICENSE](LICENSE).
+Thanks to the upstream project and the USB/UI/IR work documented in the
+[landscape comparison](docs/landscape.md). MIT; see [LICENSE](LICENSE).

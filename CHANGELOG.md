@@ -12,11 +12,13 @@
   path boundaries. Firmware failures now surface as MCP errors.
 - Added observed-state checks for app closure and refused UI workflow launches
   while another app remains open.
-- Exercised hardware and all 64 tool entries in the
-  [coverage report](docs/hardware-validation.md). Some entries cover only safety
-  gates or blocked/deferred hardware tests, not successful device operations.
-- Clock-setting and NFC UI closure exposed USB/device instability on mntm-010.
-  Firmware was intentionally unchanged; recovery and physical target tests remain.
+- Exercised all 64 tools on mntm-010, then 63 after the user upgraded to mntm-012.
+  Counts include safety refusals; see the [coverage report](docs/hardware-validation.md).
+- Captured JVC Power/Volume Up RAW IR and sent one targeted Volume Up burst.
+  Firmware accepted it; TV response is unconfirmed. Normal TX remains disabled.
+- NFC CLI still fails; app closure needs Back. The clock setter was not retried
+  after its earlier USB disconnect. Recorded resumption steps in [PLAN.md](PLAN.md)
+  and condensed setup, hardware, and IR documentation.
 
 ## 2026-08-08
 

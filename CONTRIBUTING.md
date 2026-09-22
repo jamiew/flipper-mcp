@@ -93,7 +93,7 @@ def test_fingerprint_your_protocol():
 ### 6. Run the suite and open a PR
 
 ```bash
-pytest
+uv run --no-sync pytest
 ```
 
 Include in your PR:
@@ -120,9 +120,9 @@ Propose new packs in your PR description if none of the existing ones fit.
 Standard workflow:
 
 ```bash
-uv venv && source .venv/bin/activate
-uv pip install -e ".[dev]"
-pytest
+uv sync --locked --extra dev
+uv run --no-sync ruff check flipper_mcp tests
+uv run --no-sync pytest
 ```
 
 - Keep the bridge surface narrow. Each new MCP tool should map to a single
