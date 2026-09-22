@@ -3,22 +3,17 @@
 Running log of setup gotchas, decisions, and things learned while working on
 this fork.
 
-## Setup gotcha: mcp must be `<2`
+## Current setup: official MCP SDK v2
 
-The server imports `mcp.server.fastmcp.FastMCP`. **mcp 2.0.0 removed that
-module** (FastMCP moved to a standalone `fastmcp` package). With an unpinned
-`mcp>=1.2`, a fresh install resolves to 2.x and the server dies at import with:
+The server uses `mcp.server.MCPServer` from `mcp>=2.2,<3`.
+The earlier v1 pin is obsolete; the standalone FastMCP package is not needed.
+Run `uv sync --locked --extra dev`, then restart the MCP process.
+SDK v2 runs synchronous tools on worker threads, so complete tool calls and
+serial transactions are serialized to protect the single USB CLI session.
 
-```
-ModuleNotFoundError: No module named 'mcp.server.fastmcp'
-```
-
-To the MCP client this looks like "Connection closed" with no detail, because
-the crash happens before the stdio handshake. Fixed by pinning `mcp>=1.2,<2` in
-`pyproject.toml`. If you hit the error, run `uv pip install "mcp>=1.2,<2"`.
-
-Longer-term option: migrate to the standalone `fastmcp` package and drop the pin.
-Not done yet -- the 1.x API works and the import is the only coupling.
+The project `.mcp.json` was verified with Oh My Pi. It already launches the
+local editable checkout. See [hardware validation](hardware-validation.md)
+for actual coverage, firmware incompatibilities, and capture prerequisites.
 
 ## Install for Claude Code (project scope)
 
@@ -56,7 +51,7 @@ printf '%s\n' \
   '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | .venv/bin/flipper-mcp
 ```
 
-Current tool count: 55.
+Current tool count: 64, plus the `rf_triage` prompt.
 
 ## Modernization pass (2026-08-08)
 

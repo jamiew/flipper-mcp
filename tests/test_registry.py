@@ -115,6 +115,28 @@ def test_fingerprint_nec_ir():
     assert "nec-ir" in ids
 
 
+def test_fingerprint_saved_ir_extracts_lowercase_fields():
+    sample = "protocol: NEC\naddress: 00 EA C7 00\ncommand: 0A 00 00 00\n"
+    hit = next(
+        match
+        for match in Registry.load_bundled().fingerprint(sample, category="ir")
+        if match.protocol.id == "nec-ir"
+    )
+    assert hit.fields == {"address": "00 EA C7 00", "command": "0A 00 00 00"}
+
+
+def test_fingerprint_live_ir_cli_output():
+    registry = Registry.load_bundled()
+    nec = registry.fingerprint("NEC, A:0x04, C:0x15", category="ir")
+    assert [(hit.protocol.id, hit.fields) for hit in nec] == [
+        ("nec-ir", {"address": "0x04", "command": "0x15"})
+    ]
+    sony = registry.fingerprint("SIRC20, A:0x01, C:0x15 R", category="ir")
+    assert [(hit.protocol.id, hit.fields) for hit in sony] == [
+        ("sony-ir", {"address": "0x01", "command": "0x15"})
+    ]
+
+
 def test_fingerprint_tpms():
     r = get_registry()
     matches = r.fingerprint(TPMS_SAMPLE, category="subghz")

@@ -208,3 +208,35 @@ def test_uninstall_removes_cached_file(isolated_cache):
 
 def test_uninstall_returns_false_for_missing(isolated_cache):
     assert uninstall_from_cache("never-existed") is False
+
+
+def test_uninstall_cannot_escape_cache(isolated_cache):
+    isolated_cache.mkdir(parents=True)
+    sentinel = isolated_cache.parent / "sentinel.json"
+    sentinel.write_text("keep")
+    with pytest.raises(RegistryError):
+        uninstall_from_cache("../sentinel")
+    assert sentinel.read_text() == "keep"
+
+
+def test_install_cannot_escape_cache(http_server, isolated_cache):
+    directory, base_url = http_server
+    payload = {**SAMPLE_PROTOCOL, "id": "../sentinel"}
+    (directory / "payload.json").write_text(json.dumps(payload))
+    entry = RemoteProtocolEntry(id="../sentinel", url=f"{base_url}/payload.json")
+    with pytest.raises(RegistryError):
+        install_from_entry(entry)
+    assert not (isolated_cache.parent / "sentinel.json").exists()
+
+
+def test_install_cannot_overwrite_symlink_target(http_server, isolated_cache):
+    directory, base_url = http_server
+    _write_protocol(directory, SAMPLE_PROTOCOL)
+    isolated_cache.mkdir(parents=True)
+    sentinel = isolated_cache.parent / "sentinel.json"
+    sentinel.write_text("keep")
+    (isolated_cache / "test-remote-proto.json").symlink_to(sentinel)
+    entry = RemoteProtocolEntry(id="test-remote-proto", url=f"{base_url}/test-remote-proto.json")
+    with pytest.raises(RegistryError):
+        install_from_entry(entry)
+    assert sentinel.read_text() == "keep"

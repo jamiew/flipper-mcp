@@ -167,6 +167,10 @@ def _launch_and_wait(
     app_id: str,
     launch_settle_s: float = 0.4,
 ) -> str:
+    if bridge.send("loader info").strip() != "No application is running":
+        raise UIError(
+            "An app is still running. Close it and verify the main screen before launching."
+        )
     raw = bridge.send(f"loader open {app_id}", timeout=10.0)
     time.sleep(launch_settle_s)
     return raw
@@ -234,6 +238,17 @@ def close_any_running_app(bridge: FlipperBridge) -> dict:
     radio commands can run again.
     """
     before = bridge.send("loader info")
+    if before.strip() == "No application is running":
+        return {"before": before, "close_result": "", "after": before}
     closed = bridge.send("loader close")
-    after = bridge.send("loader info")
-    return {"before": before, "close_result": closed, "after": after}
+    deadline = time.monotonic() + 3.0
+    while True:
+        after = bridge.send("loader info")
+        if after.strip() == "No application is running":
+            return {"before": before, "close_result": closed, "after": after}
+        if time.monotonic() >= deadline:
+            raise UIError(
+                "The app is still running after loader close. "
+                "Press Back on the device and verify the main screen before continuing."
+            )
+        time.sleep(0.1)

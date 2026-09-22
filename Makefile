@@ -12,8 +12,7 @@ help:
 	@echo "  make clean        remove build artifacts and .venv"
 
 install:
-	uv venv
-	uv pip install -e ".[dev]"
+	uv sync --locked --extra dev
 
 test:
 	.venv/bin/pytest -v

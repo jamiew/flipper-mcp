@@ -6,7 +6,7 @@
   "modulation": "PWM",
   "fingerprint": {
     "regex_patterns": [
-      "\\bSIRC\\b",
+      "\\bSIRC(?:15|20)?\\b",
       "Protocol:\\s*Sony",
       "\\bSony\\s?1[25]\\b",
       "\\bSony20\\b"

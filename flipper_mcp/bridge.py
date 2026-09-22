@@ -5,15 +5,11 @@ Design notes:
     and /dev/serial/by-id/*Flipper* on Linux. Default framing is just CRLF.
   - The CLI echoes input and paints ANSI colors/escape codes. Both are
     stripped before returning output to the caller.
-  - We don't rely solely on the `>: ` prompt to detect command completion.
-    Some commands (subghz rx, ir rx, nfc detect) stream until interrupted,
-    and others print the prompt mid-output. Instead we use a quiet-period
-    detector: the command is "done" when the serial buffer has been silent
-    for `quiet_ms` milliseconds. navcore's pi-flipper-hid uses the same
-    trick and it's empirically robust.
-  - Reads happen on a background thread that appends to a shared bytearray
-    under a lock. This avoids blocking the main thread and lets us peek at
-    buffer size for the quiet-period check.
+  - One-shot commands finish only after a trailing prompt and a quiet period.
+    Silence after an echo is not completion. Streaming commands are explicitly
+    interrupted before waiting for the prompt.
+  - A reader thread owns serial reads; a separate transaction lock prevents
+    callers from consuming or clearing each other's responses.
 """
 
 from __future__ import annotations
@@ -27,6 +23,7 @@ import re
 import sys
 import threading
 import time
+from collections.abc import Iterator
 
 import serial
 
@@ -74,12 +71,17 @@ class FlipperBridge:
             raise FlipperError(f"Could not open {self.port}: {e}") from e
         self._buf = bytearray()
         self._lock = threading.Lock()
+        self._transaction_lock = threading.Lock()
         self._stop = threading.Event()
         self._alive = threading.Event()
         self._alive.set()
         self._reader = threading.Thread(target=self._read_loop, name="flipper-reader", daemon=True)
         self._reader.start()
-        self._handshake()
+        try:
+            self._handshake()
+        except BaseException:
+            self.close()
+            raise
 
     # -- discovery ----------------------------------------------------------
 
@@ -103,17 +105,17 @@ class FlipperBridge:
     # -- reader thread ------------------------------------------------------
 
     def _read_loop(self) -> None:
-        while not self._stop.is_set():
-            try:
+        try:
+            while not self._stop.is_set():
                 data = self._ser.read(4096)
-            except (serial.SerialException, OSError):
-                # Port went away (unplug, reset). Mark dead so the next call
-                # tears down the stale singleton and reconnects.
-                self._alive.clear()
-                break
-            if data:
-                with self._lock:
-                    self._buf.extend(data)
+                if data:
+                    with self._lock:
+                        self._buf.extend(data)
+        except (serial.SerialException, OSError):
+            # Port went away (unplug, reset). The next caller must reconnect.
+            pass
+        finally:
+            self._alive.clear()
 
     @property
     def alive(self) -> bool:
@@ -137,11 +139,14 @@ class FlipperBridge:
         """True when the buffer tail is the CLI prompt, i.e. a command finished."""
         with self._lock:
             tail = bytes(self._buf[-64:])
-        return ANSI_RE.sub("", tail.decode("utf-8", errors="replace")).rstrip().endswith(PROMPT)
+        text = ANSI_RE.sub("", tail.decode("utf-8", errors="replace"))
+        return re.search(r"(?:^|[\r\n])>:\s*$", text) is not None
 
     # -- writing ------------------------------------------------------------
 
     def _write(self, payload: str) -> None:
+        if not self.alive:
+            raise FlipperError("The Flipper serial link is closed or disconnected.")
         try:
             self._ser.write(payload.encode("utf-8"))
             self._ser.flush()
@@ -152,31 +157,43 @@ class FlipperBridge:
     # -- waiting ------------------------------------------------------------
 
     def _wait_quiet(self, timeout: float, quiet_ms: int) -> None:
-        """Block until the command settles, or timeout.
-
-        Settled means the CLI prompt has reappeared at the buffer tail (the
-        real completion signal), or, as a fallback for commands that don't
-        return a prompt, the buffer has been silent for `quiet_ms`. Waiting on
-        the prompt stops slow commands (storage_md5, tx_from_file) from being
-        cut off by the quiet timer firing on the instant command echo.
-        """
+        """Wait for a quiet trailing prompt, never for silence alone."""
         quiet_s = quiet_ms / 1000.0
         deadline = time.monotonic() + timeout
         last_size = self._peek_size()
         last_change = time.monotonic()
 
-        while time.monotonic() < deadline:
-            time.sleep(0.02)
-            if self._ends_with_prompt():
-                return
-            size = self._peek_size()
+        while True:
+            if not self.alive:
+                raise FlipperError("The Flipper serial link closed before the command completed.")
             now = time.monotonic()
+            size = self._peek_size()
             if size != last_size:
                 last_size = size
                 last_change = now
-            elif size > 0 and (now - last_change) >= quiet_s:
+            if self._ends_with_prompt() and now - last_change >= quiet_s:
                 return
-        # Timed out — return whatever we have
+            if now >= deadline:
+                raise FlipperError(
+                    f"Timed out after {timeout:g}s waiting for the Flipper CLI prompt."
+                )
+            time.sleep(min(0.02, deadline - now))
+
+    @contextlib.contextmanager
+    def _transaction(self, timeout: float) -> Iterator[None]:
+        if not self._transaction_lock.acquire(timeout=max(0.0, timeout)):
+            raise FlipperError("Timed out waiting for another Flipper operation to finish.")
+        try:
+            if not self.alive:
+                raise FlipperError("The Flipper serial link is closed or disconnected.")
+            try:
+                yield
+            except BaseException:
+                # A partial response cannot safely frame the next command.
+                self.close()
+                raise
+        finally:
+            self._transaction_lock.release()
 
     # -- cleanup ------------------------------------------------------------
 
@@ -205,15 +222,18 @@ class FlipperBridge:
         # macOS opens USB-CDC with DTR asserted, which triggers the Flipper's
         # welcome banner (ASCII dolphin + firmware string + prompt). If we
         # drain too early the banner leaks into the first command's output.
-        # Wait for the line to go quiet, *then* drain.
+        # Require a quiet prompt before draining the welcome banner.
         self._write("\r\n")
         self._wait_quiet(timeout=3.0, quiet_ms=500)
         self._drain()
 
     def close(self) -> None:
+        self._alive.clear()
         self._stop.set()
         with contextlib.suppress(Exception):
             self._ser.close()
+        if self._reader is not threading.current_thread():
+            self._reader.join(timeout=1.0)
 
     def __enter__(self) -> FlipperBridge:
         return self
@@ -223,12 +243,21 @@ class FlipperBridge:
 
     # -- public API ---------------------------------------------------------
 
+    @staticmethod
+    def _check_text(text: str, allowed_controls: str = "") -> None:
+        if any(
+            (ord(char) < 32 or ord(char) == 127) and char not in allowed_controls for char in text
+        ):
+            raise FlipperError("CLI input contains unsupported control characters.")
+
     def send(self, cmd: str, timeout: float = 10.0, quiet_ms: int = 300) -> str:
-        """Run a one-shot command, return cleaned output once it settles."""
-        self._drain()
-        self._write(cmd + "\r\n")
-        self._wait_quiet(timeout, quiet_ms)
-        return self._clean(self._snapshot(), cmd)
+        """Run a one-shot command; raise if no settled prompt arrives in time."""
+        self._check_text(cmd)
+        with self._transaction(timeout):
+            self._drain()
+            self._write(cmd + "\r\n")
+            self._wait_quiet(timeout, quiet_ms)
+            return self._clean(self._snapshot(), cmd)
 
     def stream(
         self,
@@ -238,12 +267,22 @@ class FlipperBridge:
         quiet_ms: int = 300,
     ) -> str:
         """Run a streaming command for `duration` seconds, Ctrl-C, return output."""
-        self._drain()
-        self._write(cmd + "\r\n")
-        time.sleep(duration)
-        self._write("\x03")  # Ctrl-C
-        self._wait_quiet(post_timeout, quiet_ms)
-        return self._clean(self._snapshot(), cmd)
+        self._check_text(cmd)
+        with self._transaction(post_timeout):
+            self._drain()
+            try:
+                self._write(cmd + "\r\n")
+                deadline = time.monotonic() + duration
+                while self.alive and not self._ends_with_prompt():
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    time.sleep(min(0.02, remaining))
+            finally:
+                if self.alive and not self._ends_with_prompt():
+                    self._write("\x03")  # Ctrl-C, even if the wait was interrupted
+            self._wait_quiet(post_timeout, quiet_ms)
+            return self._clean(self._snapshot(), cmd)
 
     def interrupt(self) -> str:
         """Send a lone Ctrl-C to recover from a stuck streaming command.
@@ -253,10 +292,11 @@ class FlipperBridge:
         terminating Ctrl-C). Returns whatever output the CLI emits while
         closing out.
         """
-        self._drain()
-        self._write("\x03")
-        self._wait_quiet(timeout=2.0, quiet_ms=200)
-        return self._clean(self._snapshot())
+        with self._transaction(2.0):
+            self._drain()
+            self._write("\x03")
+            self._wait_quiet(timeout=2.0, quiet_ms=200)
+            return self._clean(self._snapshot())
 
     def write_file(
         self,
@@ -269,16 +309,23 @@ class FlipperBridge:
         Uses ``storage write <path>`` which reads stdin until Ctrl-C. Small
         text files only — not suitable for binary payloads or large files.
         """
-        self._drain()
-        self._write(f"storage write {path}\r\n")
-        # Give the Flipper a moment to open the file and start reading
-        time.sleep(0.3)
-        self._write(content)
-        if not content.endswith("\n"):
-            self._write("\n")
-        self._write("\x03")  # end write session
-        self._wait_quiet(timeout=end_timeout, quiet_ms=300)
-        return self._clean(self._snapshot())
+        self._check_text(path)
+        self._check_text(content, allowed_controls="\t\r\n")
+        with self._transaction(end_timeout):
+            self._drain()
+            try:
+                # CR enters stdin mode; a trailing LF would become file data.
+                self._write(f"storage write {path}\r")
+                # Give the Flipper a moment to open the file and start reading.
+                time.sleep(0.3)
+                if self._ends_with_prompt():
+                    raise FlipperError("Storage write exited before accepting content.")
+                self._write(content)
+            finally:
+                if self.alive and not self._ends_with_prompt():
+                    self._write("\x03")  # end write session, including on failure
+            self._wait_quiet(timeout=end_timeout, quiet_ms=300)
+            return self._clean(self._snapshot())
 
 
 # ---------------------------------------------------------------------------

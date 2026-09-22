@@ -15,13 +15,13 @@ Point the target remote at the top of the Flipper and press one button while
   output against the bundled protocol registry and returns structured matches
   (protocol id, decoded address/command, typical devices, references).
 
-Prefer `ir_scan_and_identify`: it tells you the protocol name and the exact
-`address` / `command` bytes in one step.
+Prefer `ir_scan_and_identify`, but retain the raw output. The bundled registry
+does not cover every protocol the firmware decodes.
 
 Example: press Volume-Up on a Samsung remote, get back roughly:
 
 ```
-protocol: Samsung32   address: 07 07   command: 07 00
+Samsung32, A:0x0707, C:0x07
 ```
 
 ## 2. Build a button map
@@ -34,12 +34,12 @@ and models differ).
 
 ## 3. Replay a specific command
 
-- `ir_tx(protocol, address, command)` -- transmit one decoded signal. Accepts
-  space-separated bytes (`"07 07"`) or concatenated hex (`"0707"`); spaces are
-  stripped for you.
+- `ir_tx(protocol, address, command)` requires `FLIPPER_ENABLE_TX=1`.
+  Pass numeric CLI hex unchanged. Space-separated bytes from saved `.ir`
+  files are little-endian: `"07 00 00 00"` becomes numeric `"7"`.
 
 ```
-ir_tx("Samsung32", "0707", "0700")   # volume up
+ir_tx("Samsung32", "0707", "07")   # only if this matches your captured button
 ```
 
 Watch the TV to confirm the mapping, then label that command in your map.
@@ -49,18 +49,17 @@ Watch the TV to confirm the mapping, then label that command in your map.
 The firmware ships a universal remote DB. Unlike a blind power blast, you can
 enumerate and send individual buttons:
 
-- `ir_universal_list(category)` -- list buttons for a category (`tv`, `audio`,
-  `projector`, `ac`).
-- `ir_universal_send(category, button)` -- send one, e.g.
-  `ir_universal_send("tv", "Power")`. Good for control before you've decoded the
-  real remote.
+- `ir_universal_list(category)` lists exact button names. Categories include
+  `tv`, `audio`, `projectors`, `ac`, and `fans`, depending on installed assets.
+- `ir_universal_send("tv", "Vol_dn")` sends every database entry for that button,
+  not one TV-specific code. It is gated and needs physical confirmation.
 
 ## Gotchas
 
-- `ir_tx` needs the firmware's external `cli_ir.fal` plugin loaded. If it
-  returns "failed to load external command", update firmware via qFlipper to
-  refresh external CLI plugins. `ir_rx`, `ir_scan_and_identify`, and
-  `ir_universal_*` do not need it, so start there.
+- All IR CLI operations depend on the firmware's IR CLI support and assets.
+  A plugin-load error is a failure, not an empty successful capture. Keep
+  firmware and SD assets matched; changing host Python code cannot repair
+  missing firmware plugins.
 - Only one host can hold the serial port. Close qFlipper and any
   lab.flipper.net browser tab before running captures.
 - IR is line-of-sight and short-range. Aim the emitter (top edge of the Flipper)

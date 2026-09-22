@@ -167,45 +167,32 @@ def test_run_sequence_drives_bridge(monkeypatch):
 # -- workflow macros -------------------------------------------------------
 
 
-def test_subghz_read_start_ui_issues_expected_cli(monkeypatch):
-    monkeypatch.setattr(time, "sleep", lambda s: None)
-    b = FakeBridge()
-    result = ui.subghz_read_start_ui(b)
-    assert b.calls[0] == "loader open Sub-GHz"
-    assert b.calls[1] == "input send ok short"
-    assert b.calls[-1] == "loader info"
-    assert result["app"] == "Sub-GHz"
+def test_workflow_refuses_to_navigate_an_existing_app():
+    bridge = FakeBridge('Application "NFC" is running')
+    with pytest.raises(ui.UIError):
+        ui.infrared_learn_start_ui(bridge)
+    assert not any(cmd.startswith(("loader open", "input send")) for cmd in bridge.calls)
 
 
-def test_nfc_read_start_ui_issues_expected_cli(monkeypatch):
-    monkeypatch.setattr(time, "sleep", lambda s: None)
-    b = FakeBridge()
-    ui.nfc_read_start_ui(b)
-    assert b.calls == [
-        "loader open NFC",
-        "input send ok short",
-        "loader info",
-    ]
+def test_close_waits_for_observed_app_exit(monkeypatch):
+    monkeypatch.setattr(time, "sleep", lambda _: None)
+    replies = iter(
+        [
+            'Application "NFC" is running',
+            'Application "NFC" was closed',
+            'Application "NFC" is running',
+            "No application is running",
+        ]
+    )
+    bridge = FakeBridge()
+    bridge.send = lambda *args, **kwargs: next(replies)
+    assert ui.close_any_running_app(bridge)["after"] == "No application is running"
 
 
-def test_infrared_learn_start_ui_navigates_down_then_ok(monkeypatch):
-    monkeypatch.setattr(time, "sleep", lambda s: None)
-    b = FakeBridge()
-    ui.infrared_learn_start_ui(b)
-    assert b.calls[:3] == [
-        "loader open Infrared",
-        "input send down short",
-        "input send ok short",
-    ]
-
-
-def test_close_any_running_app_records_before_and_after(monkeypatch):
-    monkeypatch.setattr(time, "sleep", lambda s: None)
-    b = FakeBridge()
-    result = ui.close_any_running_app(b)
-    assert b.calls == [
-        "loader info",
-        "loader close",
-        "loader info",
-    ]
-    assert set(result.keys()) == {"before", "close_result", "after"}
+def test_close_reports_app_that_does_not_exit(monkeypatch):
+    monkeypatch.setattr(time, "sleep", lambda _: None)
+    ticks = iter([0.0, 4.0])
+    monkeypatch.setattr(time, "monotonic", lambda: next(ticks))
+    bridge = FakeBridge('Application "NFC" is running')
+    with pytest.raises(ui.UIError):
+        ui.close_any_running_app(bridge)

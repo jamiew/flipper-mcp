@@ -8,7 +8,7 @@
     "regex_patterns": [
       "Protocol:\\s*NEC(?:ext)?",
       "^NEC(?:ext)?$",
-      "\\bNEC\\s",
+      "\\bNEC\\b",
       "\\bNECext\\b"
     ]
   },

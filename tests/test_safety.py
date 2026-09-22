@@ -27,10 +27,73 @@ def test_check_tx_frequency(monkeypatch):
         check_tx_frequency(121_500_000)  # aviation emergency, refused
 
 
-def test_gate_raw_command_gates_tx(monkeypatch):
+@pytest.mark.parametrize(
+    "command",
+    [
+        "subghz tx_from_file /ext/x.sub",
+        "subghz tx_carrier 433920000",
+        "  SubGHz   chat 433920000 0  ",
+        "ir universal tv Power",
+        "ir universal send tv Power",
+        "ir universal_extra tv Power",
+        "ir universal LIST Power",
+        "power off",
+        "power reboot2dfu",
+        "power 5v 1",
+        "power 3v3 0",
+        "storage format /ext",
+        "factory_reset",
+        "update install /ext/update/update.fuf",
+        "update restore /ext/backup.tar",
+    ],
+)
+def test_gate_raw_command_gates_tx_and_destructive_commands(monkeypatch, command):
     monkeypatch.delenv("FLIPPER_ENABLE_TX", raising=False)
-    gate_raw_command("storage list /ext")  # benign, no raise
     with pytest.raises(FlipperError):
-        gate_raw_command("subghz tx_from_file /ext/x.sub")  # gated
+        gate_raw_command(command)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "help\rpower off",
+        "help\npower off",
+        "help\x03power off",
+        "power on\bff",
+        "power o\x00ff",
+        "power o\x7fff",
+        "power \x1b[A",
+        "subghz\tchat 433920000 0",
+        "subghz\vchat 433920000 0",
+        "ir universal\u0085tv Power",
+        "ir universal\u2028tv Power",
+        "storage list /ext; power off",
+        "help && power off",
+        "help || power off",
+        "help | power off",
+        "help `power off`",
+    ],
+)
+def test_gate_raw_command_rejects_serial_controls_and_chaining(monkeypatch, command):
+    monkeypatch.delenv("FLIPPER_ENABLE_TX", raising=False)
     with pytest.raises(FlipperError):
-        gate_raw_command("storage list /ext; power off")  # chaining refused
+        gate_raw_command(command)
+
+
+def test_gate_raw_command_preserves_read_only_commands(monkeypatch):
+    monkeypatch.delenv("FLIPPER_ENABLE_TX", raising=False)
+    for command in (
+        "help",
+        "storage list /ext",
+        "ir",
+        "ir universal",
+        "ir universal list tv",
+        "subghz",
+        "subghz rx 433920000 0",
+        "power",
+        "power info",
+        "update",
+        "update help",
+        "update backup /ext/backup.tar",
+    ):
+        gate_raw_command(command)

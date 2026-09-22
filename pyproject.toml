@@ -4,9 +4,9 @@ version = "0.5.0"
 description = "MCP server for driving a Flipper Zero over USB-CDC serial, with a bundled RF/IR protocol registry."
 requires-python = ">=3.11"
 dependencies = [
-  "mcp>=1.2,<2",  # mcp 2.0 dropped the bundled mcp.server.fastmcp module
+  "mcp>=2.2,<3",
   "pyserial>=3.5",
-  "pydantic>=2.0",
+  "pydantic>=2.12,<3",
 ]
 
 [project.optional-dependencies]

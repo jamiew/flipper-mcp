@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-09-22
+
+- Migrated to official MCP SDK 2.2 and refreshed the dependency lockfile.
+  The existing project MCP configuration still runs the local checkout.
+- Serialized tool/serial transactions, waited for complete prompts, and made
+  connection failures explicit. Fixed exact text-file writes and stream cleanup.
+- Corrected task listing, GPIO commands, LED channels, universal IR syntax,
+  saved IR byte order, and NEC/SIRC capture matching.
+- Hardened raw command gates, saved SubGHz frequency checks, and protocol-cache
+  path boundaries. Firmware failures now surface as MCP errors.
+- Added observed-state checks for app closure and refused UI workflow launches
+  while another app remains open.
+- Exercised hardware and all 64 tool entries in the
+  [coverage report](docs/hardware-validation.md). Some entries cover only safety
+  gates or blocked/deferred hardware tests, not successful device operations.
+- Clock-setting and NFC UI closure exposed USB/device instability on mntm-010.
+  Firmware was intentionally unchanged; recovery and physical target tests remain.
+
 ## 2026-08-08
 
 Forked from [Str1ck9/flipper-mcp](https://github.com/Str1ck9/flipper-mcp) at

@@ -12,7 +12,7 @@ import os
 
 from .bridge import FlipperError
 
-# Wide ISM windows (Hz). Narrow these to your region for a tighter guard.
+# Sub-GHz hardware tuning windows (Hz), not legal ISM allocations or TX authorization.
 TX_BANDS = (
     (300_000_000, 348_000_000),
     (387_000_000, 464_000_000),
@@ -23,6 +23,7 @@ TX_BANDS = (
 _GATED_PREFIXES = (
     "subghz tx",
     "ir tx",
+    "subghz chat",
     "rfid write",
     "rfid emulate",
     "ikey write",
@@ -30,13 +31,16 @@ _GATED_PREFIXES = (
     "nfc emulate",
     "power off",
     "power reboot",
+    "power 5v",
+    "power 3v3",
     "storage format",
     "factory_reset",
     "update install",
+    "update restore",
 )
 
 _TRUTHY = {"1", "true", "yes", "on"}
-_CHAIN_CHARS = (";", "&&", "||", "|", "`", "\n")
+_CHAIN_CHARS = (";", "&&", "||", "|", "`")
 
 
 def tx_enabled() -> bool:
@@ -53,18 +57,33 @@ def require_tx(action: str) -> None:
 
 
 def check_tx_frequency(hz: int) -> None:
-    """Refuse a transmit frequency outside the allowed bands, before sending."""
+    """Refuse frequencies outside the hardware windows; this is not a legal-use check."""
     if not any(lo <= hz <= hi for lo, hi in TX_BANDS):
         raise FlipperError(
-            f"{hz} Hz is outside the allowed TX bands {TX_BANDS}; refusing to transmit."
+            f"{hz} Hz is outside the hardware TX windows {TX_BANDS}; refusing to transmit."
         )
 
 
 def gate_raw_command(command: str) -> None:
     """Gate the raw-CLI escape hatch so it can't bypass the transmit checks."""
+    # Serial CLI input interprets CR, tab, backspace and escapes before dispatch.
+    # Reject them rather than normalizing a different command than the device sees.
+    if not command.isprintable():
+        raise FlipperError("Refusing CLI control characters; send one printable command per call.")
     if any(c in command for c in _CHAIN_CHARS):
         raise FlipperError("Refusing a chained/piped CLI command; send one command per call.")
     norm = " ".join(command.strip().lower().split())
+    words = command.split()
+    if (
+        len(words) >= 3
+        and words[0].lower() == "ir"
+        and words[1].lower().startswith("universal")
+        and words[2] != "list"
+    ):
+        # Firmware accepts `ir universal <remote> <signal>` and prefix-matches
+        # "universal"; only the exact, case-sensitive "list" argument is read-only.
+        require_tx("ir universal")
+        return
     for prefix in _GATED_PREFIXES:
         if norm.startswith(prefix):
             require_tx(prefix)

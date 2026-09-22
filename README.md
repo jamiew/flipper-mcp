@@ -3,9 +3,9 @@
 > **This is a fork** of [Str1ck9/flipper-mcp](https://github.com/Str1ck9/flipper-mcp).
 > Goal: harden it, keep it current, and grow the tool surface toward the best
 > ideas across the Flipper-MCP landscape (see [`docs/landscape.md`](docs/landscape.md)).
-> So far: pinned `mcp<2` (fixed a startup crash), added a ruff config and a
-> lint/format pass, hardened the registry URL fetcher, and started a `docs/`
-> dir. See [`CHANGELOG.md`](CHANGELOG.md) and [`docs/dev-notes.md`](docs/dev-notes.md).
+> Uses the official MCP Python SDK v2, serialized USB transactions, and guarded
+> transmit tools. See [`CHANGELOG.md`](CHANGELOG.md) and the
+> [hardware validation report](docs/hardware-validation.md).
 
 An [MCP](https://modelcontextprotocol.io) server that gives an LLM hands on a
 [Flipper Zero](https://flipper.net/) over USB-CDC.
@@ -33,16 +33,15 @@ couldn't unlock.
 
 | Layer | What | Status |
 |---|---|---|
-| **L1** | USB-CDC bridge + 54 MCP tools (info, storage r/w, SubGHz/IR/NFC/RFID/iButton/GPIO/loader, LED, vibro, UI automation) | ✅ working, validated on real hardware |
+| **L1** | USB-CDC bridge + 64 MCP tools | Partial hardware coverage; see the validation report |
 | **L2** | Protocol registry — 13 bundled entries, regex fingerprinter, file-header classifier | ✅ working |
-| **L3** | Remote registry sync — fetch signed protocol JSON on demand into a user cache | ✅ working |
-| **UI automation** | Synthetic button presses + workflow macros (Sub-GHz / NFC / Infrared read-start) | ✅ working |
+| **L3** | Remote registry sync with optional SHA-256 verification | Local HTTP fixture verified; no signature authentication |
+| **UI automation** | Button input and app workflows | About launch/exit verified; NFC closure and navigation need attention |
 | **CLI** | `flipper-registry` for cache management and JSON validation | ✅ working |
 
-**Tested firmware:** Official 1.4.x. Should work on community firmwares
-(Momentum, RogueMaster, Xtreme) too — the CLI surface is compatible.
-Broader decoder coverage is a real reason to prefer a community build
-when working with proprietary vendor fobs (Honda, Toyota, etc.).
+**Hardware checked:** Momentum mntm-010. CLI availability varies by firmware
+and installed external plugins. NFC CLI detection failed on this device;
+do not assume every exposed tool is supported. No firmware was flashed.
 
 **Bundled protocols (13):** Princeton, KeeLoq, CAME Atomo, Nice FLO, Hormann
 HSM, FAAC SLH, Security+ 2.0, HT12, TPMS (generic), NEC IR, Samsung32 IR,
@@ -55,8 +54,7 @@ Requires a Flipper Zero and Python 3.11+.
 ```bash
 git clone https://github.com/Str1ck9/flipper-mcp
 cd flipper-mcp
-uv venv
-uv pip install -e .
+uv sync --locked --extra dev
 ```
 
 Verify it sees your Flipper:
@@ -68,16 +66,15 @@ flipper-smoke
 # → (device_info output)
 ```
 
-> **Dependency note:** `mcp` is pinned `<2`. mcp 2.0 dropped the bundled
-> `mcp.server.fastmcp` module this server imports. If startup fails with
-> `ModuleNotFoundError: No module named 'mcp.server.fastmcp'`, you have mcp 2.x;
-> run `uv pip install "mcp>=1.2,<2"`.
+> **Dependency note:** requires `mcp>=2.2,<3`, using `mcp.server.MCPServer`.
+> Run `uv sync --locked --extra dev` after updating this checkout, then restart
+> the MCP process so it loads the new code. SDK v1 is no longer supported.
 
-## Wire into Claude Code
+## Wire into Oh My Pi or Claude Code
 
-This repo ships a project-scoped `.mcp.json`. After `make install` (or
-`uv pip install -e .`), Claude Code prompts once to approve the server, then the
-`mcp__flipper__*` tools are available whenever you work in this directory.
+This repo ships a project-scoped `.mcp.json`, verified with Oh My Pi.
+After `make install`, approve the server in your MCP client if prompted.
+It runs the local editable checkout; no second configuration file is needed.
 
 The committed config launches via `uv run --no-sync`, so it needs no absolute
 path and works for anyone who cloned the repo:
@@ -125,12 +122,12 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
 ## Safety
 
 Transmit, emulation, and destructive commands are off by default. They raise
-unless you set `FLIPPER_ENABLE_TX=1` (read fresh per call, so you can toggle it
-without restarting). This covers `ir_tx`, `subghz` TX, `nfc`/`rfid`/`ibutton`
-emulate + write, `power off`/`reboot`, and the same commands sent through the
-`flipper_cli` escape hatch. SubGHz TX frequencies are checked against an ISM
-allow-list in `flipper_mcp/safety.py`; narrow `TX_BANDS` to your region. You are
-responsible for legal, authorized use.
+unless the server is launched with `FLIPPER_ENABLE_TX=1`. This covers IR/RF
+transmission, SubGHz chat, credential writes/emulation, power changes, and
+equivalent raw CLI commands. Do not enable it globally just to run a sweep.
+SubGHz tools check hardware frequency windows, not legal regional permission.
+Use only authorized targets and frequencies. GPIO and storage mutations still
+require operator care. General Bluetooth scanning and flashing are not tools.
 
 ## Tool surface
 
@@ -187,7 +184,7 @@ is set (see [Safety](#safety)).
 ### Power / clock / bus
 | Tool | Purpose |
 |---|---|
-| `power(action)` | `off` / `reboot` / `reboot2dfu` *(gated)*, or `otg_on` / `otg_off` (5V pin) |
+| `power(action)` | `off` / `reboot` / `reboot2dfu` / `otg_on` / `otg_off`, all gated |
 | `power_info()` | Battery / charging / power state |
 | `datetime_get()` / `datetime_set(iso)` | Read / set the real-time clock |
 | `i2c_scan()` | Scan the GPIO I2C bus for responding addresses |
@@ -213,7 +210,7 @@ is set (see [Safety](#safety)).
 | `workflow_nfc_read_start()` | Launch NFC + navigate into Read |
 | `workflow_infrared_learn_start()` | Launch Infrared + navigate into Learn |
 | `workflow_close_app()` | Close any running app (returns Flipper to main screen) |
-| `ir_universal_list(category)` | List built-in universal-remote buttons (tv/audio/ac/fan) |
+| `ir_universal_list(category)` | List universal buttons; use firmware names such as `tv`, `audio`, `ac`, `fans` |
 | `ir_universal_send(category, button)` | Transmit a universal-remote button from the firmware's DB |
 
 ### Physical

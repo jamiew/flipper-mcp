@@ -182,7 +182,7 @@ class Registry:
 
             fields: dict[str, str] = {}
             for fname, fdef in proto.decoder.fields.items():
-                m = re.search(fdef.regex, cleaned)
+                m = re.search(fdef.regex, cleaned, flags=re.IGNORECASE | re.MULTILINE)
                 if m and m.groups():
                     fields[fname] = m.group(1).strip()
 
@@ -320,6 +320,17 @@ def user_cache_dir() -> Path:
     return base / "flipper-mcp" / "protocols"
 
 
+def _cache_path(protocol_id: str) -> Path:
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", protocol_id) is None:
+        raise RegistryError(
+            "Protocol ID must contain only letters, numbers, underscores or hyphens."
+        )
+    path = user_cache_dir() / f"{protocol_id}.json"
+    if path.is_symlink():
+        raise RegistryError("Refusing to mutate a symlink in the protocol cache.")
+    return path
+
+
 def _require_http_url(url: str) -> None:
     """Reject non-http(s) URLs so a registry index can't pull in file:// etc."""
     scheme = urllib.parse.urlparse(url).scheme.lower()
@@ -341,6 +352,7 @@ def fetch_index(url: str, timeout: float = 15.0) -> RemoteIndex:
 
 def install_from_entry(entry: RemoteProtocolEntry, timeout: float = 15.0) -> Path:
     """Download one protocol, verify sha256 if present, install into cache."""
+    path = _cache_path(entry.id)
     _require_http_url(entry.url)
     req = urllib.request.Request(
         entry.url,
@@ -368,16 +380,14 @@ def install_from_entry(entry: RemoteProtocolEntry, timeout: float = 15.0) -> Pat
             f"Entry id {entry.id!r} does not match payload id {proto_data.get('id')!r}"
         )
 
-    cache = user_cache_dir()
-    cache.mkdir(parents=True, exist_ok=True)
-    path = cache / f"{entry.id}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(body)
     return path
 
 
 def uninstall_from_cache(protocol_id: str) -> bool:
     """Remove a cached protocol. Returns True if a file was removed."""
-    path = user_cache_dir() / f"{protocol_id}.json"
+    path = _cache_path(protocol_id)
     if path.exists():
         path.unlink()
         return True

@@ -1,5 +1,9 @@
 # Flipper-MCP Opportunity Report
 
+Historical research. Implementation details and firmware recommendations below
+are not current validation results. See [hardware validation](hardware-validation.md)
+and the changelog before acting on these proposals.
+
 ## Executive summary
 Three moves lead. First, fix the `ir_tx` `lstrip("0x")` bug (server.py:216-217): it silently corrupts every IR code with a leading-zero byte and is the clearest correctness defect in the fork. Second, ship a `safety.py` with a single `FLIPPER_ENABLE_TX` gate plus a SubGHz frequency allow-list, wired into the two already-shipped ungated TX tools and the `flipper_execute` escape hatch. Third, add a `firmware_detect` probe (parse `firmware_origin_fork` from `device_info`) that unlocks firmware-aware behavior across every downstream tool and anchors version caveats for the user's out-of-date Momentum. Everything else worth doing over the existing CLI bridge is small and additive; only screenshot and binary file transfer need the protobuf RPC channel.
 
