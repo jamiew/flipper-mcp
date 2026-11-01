@@ -1,6 +1,8 @@
 # Changelog
 
-## 2026-11-01
+## 2026-11-01 — 0.6.0
+
+First release of this fork. Thanks to [@Str1ck9](https://github.com/Str1ck9) (James Strickland) for the original [flipper-mcp](https://github.com/Str1ck9/flipper-mcp) it builds on.
 
 - The raw CLI gate now also blocks `rfid raw_emulate`, `bt tx_carrier`,
   `bt tx_packet`, and `js` scripts unless `FLIPPER_ENABLE_TX` is set.
