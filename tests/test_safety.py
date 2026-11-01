@@ -37,6 +37,10 @@ def test_check_tx_frequency(monkeypatch):
         "ir universal send tv Power",
         "ir universal_extra tv Power",
         "ir universal LIST Power",
+        "rfid raw_emulate /ext/lfrfid/raw.ask.raw",
+        "bt tx_carrier 0 0",
+        "bt tx_packet 0 0 0",
+        "js /ext/apps/Scripts/transmit.js",
         "power off",
         "power reboot2dfu",
         "power 5v 1",
@@ -95,5 +99,8 @@ def test_gate_raw_command_preserves_read_only_commands(monkeypatch):
         "update",
         "update help",
         "update backup /ext/backup.tar",
+        "rfid raw_read ask /ext/lfrfid/raw",
+        "bt hci_info",
+        "jsonsomething",
     ):
         gate_raw_command(command)

@@ -26,6 +26,8 @@ _GATED_PREFIXES = (
     "subghz chat",
     "rfid write",
     "rfid emulate",
+    "rfid raw_emulate",
+    "bt tx",
     "ikey write",
     "ikey emulate",
     "nfc emulate",
@@ -38,6 +40,9 @@ _GATED_PREFIXES = (
     "update install",
     "update restore",
 )
+
+# Whole commands gated regardless of arguments. `js` runs a script that can transmit.
+_GATED_COMMANDS = ("js",)
 
 _TRUTHY = {"1", "true", "yes", "on"}
 _CHAIN_CHARS = (";", "&&", "||", "|", "`")
@@ -74,6 +79,9 @@ def gate_raw_command(command: str) -> None:
         raise FlipperError("Refusing a chained/piped CLI command; send one command per call.")
     norm = " ".join(command.strip().lower().split())
     words = command.split()
+    if words and words[0].lower() in _GATED_COMMANDS:
+        require_tx(words[0].lower())
+        return
     if (
         len(words) >= 3
         and words[0].lower() == "ir"

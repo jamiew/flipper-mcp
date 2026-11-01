@@ -15,48 +15,40 @@ jobs:
         python-version: ["3.11", "3.12", "3.13"]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.3.3
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
-
       - name: Install dependencies
-        run: |
-          uv venv
-          uv pip install -e ".[dev]"
+        run: uv sync --locked --extra dev
 
       - name: Run pytest
-        run: |
-          source .venv/bin/activate
-          pytest -v
+        run: uv run --no-sync pytest -v
 
       - name: Validate every bundled protocol JSON
         run: |
-          source .venv/bin/activate
           for f in flipper_mcp/protocols/*.json; do
-            flipper-registry validate "$f"
+            uv run --no-sync flipper-registry validate "$f"
           done
 
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.3.3
         with:
           python-version: "3.13"
 
-      - name: Install ruff
-        run: pip install ruff
+      - name: Install dependencies
+        run: uv sync --locked --extra dev
 
       - name: Ruff lint
-        run: ruff check flipper_mcp tests
+        run: uv run --no-sync ruff check flipper_mcp tests
 
       - name: Ruff format check
-        run: ruff format --check flipper_mcp tests
+        run: uv run --no-sync ruff format --check flipper_mcp tests
