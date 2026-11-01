@@ -29,3 +29,19 @@ def test_firmware_failure_is_an_mcp_error(monkeypatch):
     result = asyncio.run(call())
     assert result.is_error
     assert "failed to load external command" in result.content[0].text
+
+
+def test_file_inspect_reports_missing_file_as_error(monkeypatch):
+    class MissingFile:
+        def send(self, cmd, timeout):
+            return "Storage error: file/dir not exist"
+
+    monkeypatch.setattr(server, "_get_bridge", lambda: MissingFile())
+
+    async def call():
+        async with Client(server.mcp) as client:
+            return await client.call_tool("flipper_file_inspect", {"path": "/ext/nope.sub"})
+
+    result = asyncio.run(call())
+    assert result.is_error
+    assert "file/dir not exist" in result.content[0].text

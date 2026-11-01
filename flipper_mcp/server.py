@@ -79,6 +79,24 @@ def _close_bridge() -> None:
 atexit.register(_close_bridge)
 
 
+_CLI_FAILURE_RE = re.compile(
+    r"(?:failed to load external command|could not find command\b|"
+    r"Storage error:|Err:|Error:)",
+    re.IGNORECASE,
+)
+
+
+def _raise_on_cli_failure(output: str) -> None:
+    if _CLI_FAILURE_RE.match(output.lstrip()):
+        raise FlipperError(output)
+
+
+def _read_file(path: str) -> str:
+    content = _get_bridge().send(f"storage read {path}", timeout=30.0)
+    _raise_on_cli_failure(content)
+    return content
+
+
 def _tool():
     """Keep complete tool operations atomic across SDK worker threads."""
 
@@ -88,21 +106,11 @@ def _tool():
             try:
                 with _bridge_lock:
                     result = function(*args, **kwargs)
-                output = (
-                    result.get("error", result.get("raw_output"))
-                    if isinstance(result, dict)
-                    else result
-                )
-                if isinstance(output, str) and (
-                    (isinstance(result, dict) and "error" in result)
-                    or re.match(
-                        r"(?:failed to load external command|could not find command\b|"
-                        r"Storage error:|Err:|Error:)",
-                        output.lstrip(),
-                        re.IGNORECASE,
-                    )
-                ):
-                    raise FlipperError(output)
+                if isinstance(result, dict) and "error" in result:
+                    raise FlipperError(str(result["error"]))
+                output = result.get("raw_output") if isinstance(result, dict) else result
+                if isinstance(output, str):
+                    _raise_on_cli_failure(output)
                 return result
             except (FlipperError, RegistryError, ValueError) as exc:
                 raise ToolError(str(exc)) from exc
@@ -179,7 +187,7 @@ def storage_info(path: str = "/ext") -> str:
 @_tool()
 def storage_read(path: str) -> str:
     """Read a file's text contents from the Flipper filesystem."""
-    return _get_bridge().send(f"storage read {path}", timeout=30.0)
+    return _read_file(path)
 
 
 @_tool()
@@ -223,13 +231,12 @@ def subghz_tx_from_file(sub_file_path: str) -> str:
     Example path: /ext/subghz/garage.sub
     """
     require_tx("subghz tx")
-    bridge = _get_bridge()
-    content = bridge.send(f"storage read {sub_file_path}", timeout=30.0)
+    content = _read_file(sub_file_path)
     frequency = re.search(r"^Frequency:\s*(\d+)\s*$", content, re.MULTILINE)
     if frequency is None:
         raise FlipperError("Saved SubGHz file has no valid Frequency field; refusing to transmit.")
     check_tx_frequency(int(frequency[1]))
-    return bridge.send(f"subghz tx_from_file {sub_file_path}", timeout=30.0)
+    return _get_bridge().send(f"subghz tx_from_file {sub_file_path}", timeout=30.0)
 
 
 @_tool()
@@ -612,7 +619,7 @@ def flipper_file_inspect(path: str) -> dict:
     This is the fastest way to tell the agent what's in a saved capture
     without requiring the Flipper firmware to re-decode it.
     """
-    content = _get_bridge().send(f"storage read {path}", timeout=30.0)
+    content = _read_file(path)
     meta = classify_file(content)
     meta["path"] = path
 

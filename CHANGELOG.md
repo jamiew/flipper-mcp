@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-11-01
+
+- The raw CLI gate now also blocks `rfid raw_emulate`, `bt tx_carrier`,
+  `bt tx_packet`, and `js` scripts unless `FLIPPER_ENABLE_TX` is set.
+- `flipper_file_inspect` and `subghz_tx_from_file` now report a missing or
+  unreadable file as a storage error instead of an "unknown" file or a
+  misleading missing-frequency error.
+- Recorded the likely cause of the `nfc_detect` timeout in [PLAN.md](PLAN.md).
+- CI installs from `uv.lock` and uses current action versions.
+
 ## 2026-09-22
 
 - Migrated to official MCP SDK 2.2 and refreshed the dependency lockfile.

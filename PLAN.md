@@ -20,7 +20,7 @@ Paused September 22, 2026. No further hardware testing is scheduled until the us
 
 ## Known blockers
 
-- `nfc_detect` times out on mntm-012. The on-device NFC app launches; no actual tag has been read.
+- `nfc_detect` times out on mntm-012. The on-device NFC app launches; no actual tag has been read. Likely cause, from the Momentum source and not yet confirmed on hardware: `nfc` ignores its arguments and opens an interactive subshell with a `[nfc]>:` prompt. The bridge only accepts the top-level `>:` prompt, and Ctrl-C does not leave the subshell (`exit` does). `nfc_detect` and `nfc_emulate` need a subshell-aware rewrite (`nfc`, then `scanner` or `emulate`, then `exit`) tested on the device.
 - `loader_close` says About must be closed manually. Use Back/long Back and confirm idle with `loader_info`; workflow launch does not prove the selected screen.
 - RTC still reads February 2000. Setting it dropped USB on mntm-010. Do not retry blindly; investigate separately or use the device's clock settings with human confirmation.
 - GPIO output, positive I2C detection, fob/iButton decoding, Bluetooth pairing, and the TV's response remain unverified.
