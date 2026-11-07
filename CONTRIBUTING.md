@@ -120,13 +120,16 @@ Propose new packs in your PR description if none of the existing ones fit.
 Standard workflow:
 
 ```bash
-uv sync --locked --extra dev
+uv sync --locked
 uv run --no-sync ruff check flipper_mcp tests
+uv run --no-sync ty check
 uv run --no-sync pytest
 ```
 
 - Keep the bridge surface narrow. Each new MCP tool should map to a single
   Flipper CLI command or a tight, reusable workflow.
+- Pass every new tool a hint preset in `@_tool(...)`, e.g. `_READ` or
+  `_TRANSMIT`. Clients use it to decide what needs confirmation.
 - Don't add cloud dependencies. This tool runs 100% locally by design.
 - Don't silently retry or hide errors — an agent needs actionable error
   messages, not generic "something went wrong."

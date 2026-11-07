@@ -23,7 +23,7 @@ import re
 import sys
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Generator
 
 import serial
 
@@ -180,7 +180,7 @@ class FlipperBridge:
             time.sleep(min(0.02, deadline - now))
 
     @contextlib.contextmanager
-    def _transaction(self, timeout: float) -> Iterator[None]:
+    def _transaction(self, timeout: float) -> Generator[None]:
         if not self._transaction_lock.acquire(timeout=max(0.0, timeout)):
             raise FlipperError("Timed out waiting for another Flipper operation to finish.")
         try:

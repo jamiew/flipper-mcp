@@ -51,7 +51,7 @@ def http_server(tmp_path):
     handler_cls = http.server.SimpleHTTPRequestHandler
 
     class QuietHandler(handler_cls):
-        def log_message(self, *_):
+        def log_message(self, format, *args):
             pass
 
         def __init__(self, *a, **kw):
@@ -191,10 +191,14 @@ def test_user_cache_overrides_bundled(http_server, isolated_cache):
     (isolated_cache / "princeton.json").write_text(json.dumps(override))
 
     r = Registry.load(include_user_cache=True)
-    assert r.get("princeton").name == "USER-OVERRIDE princeton"
+    overridden = r.get("princeton")
+    assert overridden is not None
+    assert overridden.name == "USER-OVERRIDE princeton"
 
     r_bundled_only = Registry.load_bundled()
-    assert r_bundled_only.get("princeton").name != "USER-OVERRIDE princeton"
+    bundled = r_bundled_only.get("princeton")
+    assert bundled is not None
+    assert bundled.name != "USER-OVERRIDE princeton"
 
 
 def test_uninstall_removes_cached_file(isolated_cache):

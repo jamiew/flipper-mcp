@@ -13,6 +13,7 @@ that mild firmware-version differences in output wording don't cause misses.
 
 from __future__ import annotations
 
+import builtins
 import hashlib
 import importlib.resources
 import json
@@ -24,6 +25,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic import BaseModel, Field, ValidationError
+
+from . import __version__
 
 
 class Fingerprint(BaseModel):
@@ -80,7 +83,7 @@ class Match:
 class Registry:
     """In-memory collection of Protocol entries with filter + fingerprint APIs."""
 
-    def __init__(self, protocols: list[Protocol]) -> None:
+    def __init__(self, protocols: builtins.list[Protocol]) -> None:
         self._by_id: dict[str, Protocol] = {p.id: p for p in protocols}
 
     # -- loading -----------------------------------------------------------
@@ -123,14 +126,14 @@ class Registry:
 
     # -- querying ----------------------------------------------------------
 
-    def all(self) -> list[Protocol]:
+    def all(self) -> builtins.list[Protocol]:
         return list(self._by_id.values())
 
     def list(
         self,
         category: str | None = None,
         pack: str | None = None,
-    ) -> list[Protocol]:
+    ) -> builtins.list[Protocol]:
         result = self.all()
         if category:
             result = [p for p in result if p.category == category]
@@ -159,7 +162,7 @@ class Registry:
             text = pat.sub("", text)
         return text
 
-    def fingerprint(self, text: str, category: str | None = None) -> list[Match]:
+    def fingerprint(self, text: str, category: str | None = None) -> builtins.list[Match]:
         """Return matches for every protocol whose patterns hit in ``text``.
 
         Matching is case-insensitive + multi-line. Each protocol matches at
@@ -338,10 +341,13 @@ def _require_http_url(url: str) -> None:
         raise RegistryError(f"Refusing to fetch non-http(s) URL: {url!r}")
 
 
+_USER_AGENT = f"flipper-mcp/{__version__} (+registry-sync)"
+
+
 def fetch_index(url: str, timeout: float = 15.0) -> RemoteIndex:
     """Download and parse a remote registry index."""
     _require_http_url(url)
-    req = urllib.request.Request(url, headers={"User-Agent": "flipper-mcp/0.3 (+registry-sync)"})
+    req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         data = json.loads(resp.read().decode("utf-8"))
     try:
@@ -354,10 +360,7 @@ def install_from_entry(entry: RemoteProtocolEntry, timeout: float = 15.0) -> Pat
     """Download one protocol, verify sha256 if present, install into cache."""
     path = _cache_path(entry.id)
     _require_http_url(entry.url)
-    req = urllib.request.Request(
-        entry.url,
-        headers={"User-Agent": "flipper-mcp/0.3 (+registry-sync)"},
-    )
+    req = urllib.request.Request(entry.url, headers={"User-Agent": _USER_AGENT})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         body = resp.read()
 

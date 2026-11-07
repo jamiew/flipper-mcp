@@ -19,8 +19,16 @@ silent on success).
 from __future__ import annotations
 
 import time
+from typing import Literal, Protocol
 
-from .bridge import FlipperBridge
+
+class CliSender(Protocol):
+    """The one bridge method the UI helpers need; tests pass a fake."""
+
+    def send(self, cmd: str, timeout: float = 10.0, quiet_ms: int = 300) -> str: ...
+
+
+Step = tuple[Literal["wait"], float] | tuple[Literal["key"], tuple[str, str]]
 
 # -- key normalization -----------------------------------------------------
 
@@ -61,7 +69,7 @@ def normalize_key(key: str) -> str:
 # -- single-key helpers ----------------------------------------------------
 
 
-def press_key(bridge: FlipperBridge, key: str, press_type: str = "short") -> str:
+def press_key(bridge: CliSender, key: str, press_type: str = "short") -> str:
     """Send a single synthetic keypress through the Flipper CLI.
 
     press_type: one of ``short`` | ``long`` | ``press`` | ``release``.
@@ -75,7 +83,7 @@ def press_key(bridge: FlipperBridge, key: str, press_type: str = "short") -> str
     return bridge.send(f"input send {canonical} {press_type}")
 
 
-def hold_key(bridge: FlipperBridge, key: str, duration_s: float) -> str:
+def hold_key(bridge: CliSender, key: str, duration_s: float) -> str:
     """Hold a key down for ``duration_s`` seconds, then release.
 
     Uses explicit ``press`` + ``release`` events around a wall-clock sleep,
@@ -91,7 +99,7 @@ def hold_key(bridge: FlipperBridge, key: str, duration_s: float) -> str:
 # -- sequence DSL ----------------------------------------------------------
 
 
-def parse_sequence(seq: str) -> list[tuple[str, object]]:
+def parse_sequence(seq: str) -> list[Step]:
     """Parse a mini-DSL sequence string into (op, arg) tuples.
 
     Syntax (comma-separated steps):
@@ -101,7 +109,7 @@ def parse_sequence(seq: str) -> list[tuple[str, object]]:
       - ``release:down``       release-only event
       - ``wait:0.5``           wall-clock delay in seconds
     """
-    out: list[tuple[str, object]] = []
+    out: list[Step] = []
     for raw in seq.split(","):
         tok = raw.strip()
         if not tok:
@@ -125,7 +133,7 @@ def parse_sequence(seq: str) -> list[tuple[str, object]]:
 
 
 def run_sequence(
-    bridge: FlipperBridge,
+    bridge: CliSender,
     sequence: str,
     step_delay_s: float = 0.05,
 ) -> list[str]:
@@ -137,13 +145,12 @@ def run_sequence(
     """
     steps = parse_sequence(sequence)
     results: list[str] = []
-    for op, arg in steps:
-        if op == "wait":
-            time.sleep(float(arg))
-            results.append(f"waited {arg}s")
+    for step in steps:
+        if step[0] == "wait":
+            time.sleep(step[1])
+            results.append(f"waited {step[1]}s")
             continue
-        # op == "key"
-        key, ptype = arg  # type: ignore[misc]
+        key, ptype = step[1]
         results.append(bridge.send(f"input send {key} {ptype}"))
         time.sleep(step_delay_s)
     return results
@@ -163,7 +170,7 @@ def run_sequence(
 
 
 def _launch_and_wait(
-    bridge: FlipperBridge,
+    bridge: CliSender,
     app_id: str,
     launch_settle_s: float = 0.4,
 ) -> str:
@@ -177,7 +184,7 @@ def _launch_and_wait(
 
 
 def subghz_read_start_ui(
-    bridge: FlipperBridge,
+    bridge: CliSender,
 ) -> dict:
     """Launch Sub-GHz → navigate to Read (first menu item) → start listening.
 
@@ -197,7 +204,7 @@ def subghz_read_start_ui(
     }
 
 
-def nfc_read_start_ui(bridge: FlipperBridge) -> dict:
+def nfc_read_start_ui(bridge: CliSender) -> dict:
     """Launch NFC → navigate to Read (first menu item)."""
     launch = _launch_and_wait(bridge, "NFC")
     seq_out = run_sequence(bridge, "ok")
@@ -210,7 +217,7 @@ def nfc_read_start_ui(bridge: FlipperBridge) -> dict:
     }
 
 
-def infrared_learn_start_ui(bridge: FlipperBridge) -> dict:
+def infrared_learn_start_ui(bridge: CliSender) -> dict:
     """Launch Infrared → navigate to Learn New Remote."""
     launch = _launch_and_wait(bridge, "Infrared")
     # Infrared app main menu: Universal Remotes, Learn New Remote, Saved.
@@ -230,7 +237,7 @@ def infrared_learn_start_ui(bridge: FlipperBridge) -> dict:
     }
 
 
-def close_any_running_app(bridge: FlipperBridge) -> dict:
+def close_any_running_app(bridge: CliSender) -> dict:
     """Safely close whatever app is running on the Flipper.
 
     Useful as a prologue to workflow macros that assume a clean state, or

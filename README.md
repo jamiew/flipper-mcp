@@ -28,7 +28,7 @@ Requires Python 3.11+, [uv](https://docs.astral.sh/uv/), and a USB data cable.
 ```bash
 git clone https://github.com/jamiew/flipper-mcp.git
 cd flipper-mcp
-uv sync --locked --extra dev
+uv sync --locked
 ```
 
 The project `.mcp.json` runs the editable checkout in Oh My Pi or compatible
@@ -130,8 +130,9 @@ under `$XDG_DATA_HOME/flipper-mcp/protocols` or
 ## Development and reference
 
 ```bash
-uv sync --locked --extra dev
+uv sync --locked
 uv run --no-sync ruff check flipper_mcp tests
+uv run --no-sync ty check
 uv run --no-sync pytest
 ```
 
