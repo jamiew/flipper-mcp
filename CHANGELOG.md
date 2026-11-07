@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+- `flipper_interrupt` no longer waits behind a running capture. It stops the
+  capture early, and the capture returns what it heard so far. Cancelling a
+  capture call from the client also stops it early. Both still end with Ctrl-C
+  and a prompt, so the next command starts clean.
+- Registry tools no longer wait for the device. Protocol installs write a
+  temporary file and rename it, so a concurrent read never sees half a file.
+- Registry tools, `list_installed_apps`, `flipper_file_inspect`,
+  `scan_and_identify` and `ir_scan_and_identify` now publish output schemas.
+  `flipper_file_inspect` lists every field, with null for fields the file
+  lacks, and an empty `registry_matches` for unknown files.
+- Argument schemas now carry limits, so bad values fail before reaching the
+  device: captures 0 to 600 seconds, SubGHz 281 to 962 MHz, radio device 0 or
+  1, LED channels 0 to 255, `flipper_cli` timeouts up to 120 seconds, holds up
+  to 30 seconds, step delays up to 5 seconds, GPIO values 0 or 1, and fixed
+  choices for `power` and `gpio_mode`. `gpio_write` no longer turns 2 into 1.
+- Tests check the transmit gate by calling each transmit tool with TX off
+  and confirming nothing reaches the device.
+
 ## 2026-11-07 — 0.7.0
 
 - Every tool now tells MCP clients whether it only reads, changes device

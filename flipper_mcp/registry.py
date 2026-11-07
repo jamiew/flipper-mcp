@@ -19,6 +19,7 @@ import http.client
 import importlib.resources
 import os
 import re
+import tempfile
 import urllib.parse
 import urllib.request
 from collections.abc import Iterator
@@ -72,6 +73,19 @@ def _read_protocol(entry: Traversable) -> Protocol:
     return Protocol.model_validate_json(entry.read_bytes())
 
 
+class MatchSummary(BaseModel):
+    """What a tool reports for one fingerprint hit."""
+
+    protocol_id: str
+    protocol_name: str
+    category: str
+    matched_pattern: str
+    decoded_fields: dict[str, str]
+    typical_devices: list[str]
+    security_notes: str | None
+    references: list[str]
+
+
 @dataclass
 class Match:
     """A fingerprint hit: which protocol matched, why, and what got decoded."""
@@ -80,17 +94,17 @@ class Match:
     matched_pattern: str
     fields: dict[str, str]
 
-    def to_dict(self) -> dict:
-        return {
-            "protocol_id": self.protocol.id,
-            "protocol_name": self.protocol.name,
-            "category": self.protocol.category,
-            "matched_pattern": self.matched_pattern,
-            "decoded_fields": self.fields,
-            "typical_devices": self.protocol.typical_devices,
-            "security_notes": self.protocol.security_notes,
-            "references": self.protocol.references,
-        }
+    def summary(self) -> MatchSummary:
+        return MatchSummary(
+            protocol_id=self.protocol.id,
+            protocol_name=self.protocol.name,
+            category=self.protocol.category,
+            matched_pattern=self.matched_pattern,
+            decoded_fields=self.fields,
+            typical_devices=self.protocol.typical_devices,
+            security_notes=self.protocol.security_notes,
+            references=self.protocol.references,
+        )
 
 
 class Registry:
@@ -376,17 +390,21 @@ def install_from_entry(entry: RemoteProtocolEntry, timeout: float = 15.0) -> Pat
         raise RegistryError(f"Entry id {entry.id!r} does not match payload id {proto.id!r}")
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(body)
+    # Registry tools skip the device lock, so a concurrent load must never see half a file.
+    with tempfile.NamedTemporaryFile(dir=path.parent, suffix=".tmp", delete=False) as tmp:
+        tmp.write(body)
+    os.replace(tmp.name, path)
     return path
 
 
 def uninstall_from_cache(protocol_id: str) -> bool:
     """Remove a cached protocol. Returns True if a file was removed."""
     path = _cache_path(protocol_id)
-    if path.exists():
+    try:
         path.unlink()
-        return True
-    return False
+    except FileNotFoundError:
+        return False
+    return True
 
 
 def installed_protocols() -> list[str]:

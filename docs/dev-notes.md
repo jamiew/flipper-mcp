@@ -11,14 +11,22 @@ Setup and commands live in [README.md](../README.md). Current work is in
   launches `uv run --no-sync flipper-mcp`; restart after code/dependency changes.
 - Connection is lazy. A fresh stdio client can enumerate 64 tools and the
   `rf_triage` prompt without opening USB.
-- SDK v2 executes sync tools on worker threads. Serialize complete tool
+- SDK v2 executes sync tools on worker threads. Serialize complete device tool
   operations as well as serial transactions; the device has one CLI session.
+  Registry tools never touch the device, so they skip the device lock.
+  `flipper_interrupt` also skips it: it asks an active stream to stop, then
+  waits for the bridge's transaction lock before sending Ctrl-C.
+- Streams poll for MCP request cancellation and stop early, still sending
+  Ctrl-C and waiting for the prompt so the link stays framed.
 - Every tool except `flipper_cli` declares MCP hint annotations (read-only,
   destructive, open world) so clients can auto-approve reads and confirm writes
   or transmits. `flipper_cli` keeps the spec's worst-case defaults. Hints are
-  advisory; `FLIPPER_ENABLE_TX` is the real transmit gate. Tests fail if a tool
-  that calls `require_tx` is marked read-only.
+  advisory; `FLIPPER_ENABLE_TX` is the real transmit gate. Tests call every
+  transmit tool with TX disabled, check it refuses without sending anything,
+  and fail if a transmit tool is labeled read-only.
 - Tools raise on bad input or failure. Never return an error string or dict.
+  Structured results are Pydantic models; numeric limits live in the argument
+  schema.
 
 ## Transport invariants
 

@@ -17,15 +17,21 @@ import re
 import threading
 from datetime import datetime as _datetime
 from functools import wraps
+from typing import Annotated, Literal
 
+import anyio.from_thread
 from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
+from pydantic import BaseModel, Field
 
 from . import __version__
 from .bridge import FlipperBridge, FlipperError
 from .registry import (
+    MatchSummary,
+    Protocol,
     RegistryError,
+    RemoteProtocolEntry,
     bundled_protocols,
     classify_file,
     fetch_index,
@@ -65,7 +71,21 @@ mcp = MCPServer(
 _DEFAULT_DEVICE = int(os.environ.get("FLIPPER_DEFAULT_DEVICE", "0"))
 
 _bridge: FlipperBridge | None = None
+# Guards opening and closing the serial connection.
 _bridge_lock = threading.RLock()
+# The device has one CLI session, so device tools run one at a time.
+_device_lock = threading.Lock()
+
+
+def _request_cancelled() -> bool:
+    """True once the MCP client cancels the call running on this worker thread."""
+    try:
+        anyio.from_thread.check_cancelled()
+    except RuntimeError:
+        return False  # not an SDK worker thread, e.g. a direct call
+    except BaseException:  # the event loop's cancellation exception
+        return True
+    return False
 
 
 def _get_bridge() -> FlipperBridge:
@@ -75,7 +95,7 @@ def _get_bridge() -> FlipperBridge:
             _close_bridge()
         if _bridge is None:
             port = os.environ.get("FLIPPER_PORT")
-            _bridge = FlipperBridge(port=port)
+            _bridge = FlipperBridge(port=port, cancelled=_request_cancelled)
         return _bridge
 
 
@@ -122,19 +142,20 @@ _INSTALL = ToolAnnotations(
 )
 
 
-def _tool(annotations: ToolAnnotations | None):
-    """Keep complete tool operations atomic across SDK worker threads.
+def _tool(annotations: ToolAnnotations | None, *, device: bool = True):
+    """Keep complete device operations atomic across SDK worker threads.
 
     ``None`` leaves the spec defaults (destructive, open world) for the raw CLI.
+    ``device=False`` skips the device lock for tools that never touch the device.
     """
 
     def register(function):
         @wraps(function)
         def serialized(*args, **kwargs):
             try:
-                with _bridge_lock:
+                with _device_lock if device else contextlib.nullcontext():
                     result = function(*args, **kwargs)
-                output = result.get("raw_output") if isinstance(result, dict) else result
+                output = getattr(result, "raw_output", result)
                 if isinstance(output, str):
                     _raise_on_cli_failure(output)
                 return result
@@ -144,6 +165,16 @@ def _tool(annotations: ToolAnnotations | None):
         return mcp.tool(annotations=annotations)(serialized)
 
     return register
+
+
+# Streams hold the device until they end. flipper_interrupt or cancelling the
+# call stops one early.
+StreamSeconds = Annotated[float, Field(ge=0, le=600)]
+# The Flipper's CC1101 tunes 281-361, 378-481 and 749-962 MHz; firmware rejects gaps.
+SubGhzHz = Annotated[int, Field(ge=281_000_000, le=962_000_000)]
+# 0 = internal CC1101, 1 = external module on the GPIO header.
+RadioDevice = Annotated[int, Field(ge=0, le=1)]
+LedLevel = Annotated[int, Field(ge=0, le=255)]
 
 
 def _hex_arg(s: str) -> str:
@@ -176,7 +207,7 @@ def flipper_help() -> str:
 
 
 @_tool(None)
-def flipper_cli(command: str, timeout_s: float = 10.0) -> str:
+def flipper_cli(command: str, timeout_s: Annotated[float, Field(gt=0, le=120)] = 10.0) -> str:
     """Run an arbitrary Flipper CLI command.
 
     Escape hatch for commands without a dedicated tool. For streaming commands
@@ -227,9 +258,9 @@ def storage_stat(path: str) -> str:
 
 @_tool(_LISTEN)
 def subghz_rx(
-    frequency_hz: int,
-    duration_s: float = 10.0,
-    device: int | None = None,
+    frequency_hz: SubGhzHz,
+    duration_s: StreamSeconds = 10.0,
+    device: RadioDevice | None = None,
 ) -> str:
     """Listen on SubGHz for `duration_s` seconds and return captured signals.
 
@@ -266,7 +297,7 @@ def subghz_tx_from_file(sub_file_path: str) -> str:
 
 
 @_tool(_READ)
-def subghz_decode_raw(sub_file_path: str, duration_s: float = 15.0) -> str:
+def subghz_decode_raw(sub_file_path: str, duration_s: StreamSeconds = 15.0) -> str:
     """Replay a raw .sub capture through the decoder and report matches.
 
     ``subghz decode_raw`` is a streaming command on the Flipper: it plays the
@@ -281,13 +312,13 @@ def subghz_decode_raw(sub_file_path: str, duration_s: float = 15.0) -> str:
 
 
 @_tool(_LISTEN)
-def nfc_detect(duration_s: float = 5.0) -> str:
+def nfc_detect(duration_s: StreamSeconds = 5.0) -> str:
     """Scan for NFC tags nearby for `duration_s` seconds."""
     return _get_bridge().stream("nfc detect", duration_s)
 
 
 @_tool(_TRANSMIT)
-def nfc_emulate(file_path: str = "", duration_s: float = 15.0) -> str:
+def nfc_emulate(file_path: str = "", duration_s: StreamSeconds = 15.0) -> str:
     """Emulate a saved .nfc tag (or the last-read tag if no path) for a duration.
 
     Gated behind FLIPPER_ENABLE_TX. Pass a path like /ext/nfc/mycard.nfc, or
@@ -302,7 +333,7 @@ def nfc_emulate(file_path: str = "", duration_s: float = 15.0) -> str:
 
 
 @_tool(_LISTEN)
-def ir_rx(duration_s: float = 10.0) -> str:
+def ir_rx(duration_s: StreamSeconds = 10.0) -> str:
     """Listen for IR remote signals for `duration_s` seconds.
 
     Point the target remote at the top of the Flipper and press buttons.
@@ -349,7 +380,7 @@ def uptime() -> str:
 
 
 @_tool(_DESTRUCTIVE)
-def power(action: str) -> str:
+def power(action: Literal["off", "reboot", "reboot2dfu", "otg_on", "otg_off"]) -> str:
     """Control device power. action: off | reboot | reboot2dfu | otg_on | otg_off.
 
     All actions are gated behind FLIPPER_ENABLE_TX. Power-down and reboot
@@ -362,9 +393,7 @@ def power(action: str) -> str:
         "otg_on": "power 5v 1",
         "otg_off": "power 5v 0",
     }
-    cmd = verbs.get(action)
-    if cmd is None:
-        raise ValueError(f"Unknown power action {action!r}. Valid: {sorted(verbs)}.")
+    cmd = verbs[action]
     require_tx(f"power {action}")
     if action in ("off", "reboot", "reboot2dfu"):
         with contextlib.suppress(FlipperError):
@@ -404,13 +433,11 @@ def i2c_scan() -> str:
 
 
 @_tool(_CONTROL)
-def led(r: int = 0, g: int = 0, b: int = 0) -> str:
+def led(r: LedLevel = 0, g: LedLevel = 0, b: LedLevel = 0) -> str:
     """Set the RGB LED on the Flipper. Each channel: 0-255.
 
     Handy for giving the agent a visible heartbeat during long scans.
     """
-    if any(not 0 <= value <= 255 for value in (r, g, b)):
-        raise ValueError("LED channels must be between 0 and 255.")
     bridge = _get_bridge()
     return "\n".join(
         bridge.send(f"led {channel} {value}")
@@ -466,7 +493,7 @@ def storage_md5(path: str) -> str:
 
 
 @_tool(_LISTEN)
-def subghz_rx_raw(frequency_hz: int, duration_s: float = 10.0) -> str:
+def subghz_rx_raw(frequency_hz: SubGhzHz, duration_s: StreamSeconds = 10.0) -> str:
     """Capture raw pulse timings on a SubGHz frequency, no decoding.
 
     Unlike ``subghz_rx`` (which only emits when a known protocol decodes),
@@ -483,9 +510,9 @@ def subghz_rx_raw(frequency_hz: int, duration_s: float = 10.0) -> str:
 
 @_tool(_TRANSMIT)
 def subghz_chat(
-    frequency_hz: int = 433920000,
-    duration_s: float = 30.0,
-    device: int | None = None,
+    frequency_hz: SubGhzHz = 433920000,
+    duration_s: StreamSeconds = 30.0,
+    device: RadioDevice | None = None,
 ) -> str:
     """Listen on SubGHz chat mode — receive broadcast messages from other Flippers.
 
@@ -501,7 +528,7 @@ def subghz_chat(
 
 
 @_tool(_LISTEN)
-def rfid_read(duration_s: float = 10.0) -> str:
+def rfid_read(duration_s: StreamSeconds = 10.0) -> str:
     """Scan for 125 kHz LF-RFID cards for `duration_s` seconds.
 
     Requires ``cli_rfid.fal`` plugin loaded on the firmware.
@@ -520,7 +547,7 @@ def rfid_write(key_type: str, key_data: str) -> str:
 
 
 @_tool(_TRANSMIT)
-def rfid_emulate(key_type: str, key_data: str, duration_s: float = 15.0) -> str:
+def rfid_emulate(key_type: str, key_data: str, duration_s: StreamSeconds = 15.0) -> str:
     """Emulate a 125 kHz LF-RFID tag for a duration. Gated behind FLIPPER_ENABLE_TX.
 
     key_type: EM4100 | H10301 | Indala26. key_data: hex ID from rfid_read.
@@ -530,7 +557,7 @@ def rfid_emulate(key_type: str, key_data: str, duration_s: float = 15.0) -> str:
 
 
 @_tool(_LISTEN)
-def ibutton_read(duration_s: float = 10.0) -> str:
+def ibutton_read(duration_s: StreamSeconds = 10.0) -> str:
     """Scan for iButton / 1-Wire keys for `duration_s` seconds."""
     return _get_bridge().stream("ikey read", duration_s)
 
@@ -546,7 +573,7 @@ def ibutton_write(key_data: str) -> str:
 
 
 @_tool(_TRANSMIT)
-def ibutton_emulate(key_type: str, key_data: str, duration_s: float = 15.0) -> str:
+def ibutton_emulate(key_type: str, key_data: str, duration_s: StreamSeconds = 15.0) -> str:
     """Emulate an iButton key for a duration. Gated behind FLIPPER_ENABLE_TX.
 
     key_type: Dallas (8B) | Cyfral (2B) | Metakom (4B). key_data: hex from ibutton_read.
@@ -568,21 +595,18 @@ def gpio_read(pin: str) -> str:
 
 
 @_tool(_CONTROL)
-def gpio_write(pin: str, value: int) -> str:
+def gpio_write(pin: str, value: Annotated[int, Field(ge=0, le=1)]) -> str:
     """Set a GPIO pin high (1) or low (0); configure output mode separately."""
-    return _get_bridge().send(f"gpio set {pin} {int(bool(value))}")
+    return _get_bridge().send(f"gpio set {pin} {value}")
 
 
 @_tool(_CONTROL)
-def gpio_mode(pin: str, mode: str) -> str:
+def gpio_mode(pin: str, mode: Literal["input", "output"]) -> str:
     """Configure a GPIO pin's direction/mode.
 
     mode: input (0) or output (1).
     """
-    modes = {"input": 0, "output": 1}
-    if mode not in modes:
-        raise ValueError("GPIO mode must be 'input' or 'output'.")
-    return _get_bridge().send(f"gpio mode {pin} {modes[mode]}")
+    return _get_bridge().send(f"gpio mode {pin} {1 if mode == 'output' else 0}")
 
 
 # -- loader / app control ---------------------------------------------------
@@ -623,18 +647,37 @@ def loader_list() -> str:
 # -- recovery and introspection ---------------------------------------------
 
 
-@_tool(_CONTROL)
+@_tool(_CONTROL, device=False)
 def flipper_interrupt() -> str:
     """Send a Ctrl-C to the Flipper CLI to recover from a stuck streaming command.
 
     Use this if you suspect an earlier ``flipper_cli`` call left the Flipper
-    in a listening state (no terminating Ctrl-C was sent).
+    in a listening state (no terminating Ctrl-C was sent). It also stops a
+    running capture tool early; that tool returns what it captured so far.
     """
+    # Skips the device lock so it can stop a capture; the bridge keeps framing safe.
     return _get_bridge().interrupt()
 
 
+class FileInspection(BaseModel):
+    path: str
+    kind: str
+    filetype: str | None = None
+    version: str | None = None
+    frequency_hz: int | None = None
+    preset: str | None = None
+    protocol_named: str | None = None
+    ir_signal_type: str | None = None
+    device_type: str | None = None
+    uid: str | None = None
+    key_type: str | None = None
+    data: str | None = None
+    note: str | None = None
+    registry_matches: list[MatchSummary] = Field(default_factory=list)
+
+
 @_tool(_READ)
-def flipper_file_inspect(path: str) -> dict:
+def flipper_file_inspect(path: str) -> FileInspection:
     """Read a file on the Flipper and classify it by its Filetype header.
 
     Recognizes Flipper save files (SubGHz raw/parsed, NFC, IR, LF-RFID,
@@ -646,8 +689,7 @@ def flipper_file_inspect(path: str) -> dict:
     without requiring the Flipper firmware to re-decode it.
     """
     content = _read_file(path)
-    meta = classify_file(content)
-    meta["path"] = path
+    result = FileInspection(path=path, **classify_file(content))
 
     # If the file names a protocol, also fingerprint the content in case
     # our registry can add security notes / typical_devices metadata.
@@ -659,15 +701,20 @@ def flipper_file_inspect(path: str) -> dict:
         "lfrfid": "lfrfid",
         "ibutton": "ibutton",
     }
-    reg_cat = category_map.get(meta.get("kind", ""))
+    reg_cat = category_map.get(result.kind)
     if reg_cat is not None:
         matches = get_registry().fingerprint(content, category=reg_cat)
-        meta["registry_matches"] = [m.to_dict() for m in matches]
-    return meta
+        result.registry_matches = [m.summary() for m in matches]
+    return result
+
+
+class InstalledApps(BaseModel):
+    categories: dict[str, list[str]]
+    total_apps: int
 
 
 @_tool(_READ)
-def list_installed_apps() -> dict:
+def list_installed_apps() -> InstalledApps:
     """Enumerate installed FAP apps under ``/ext/apps/*/*.fap``.
 
     Returns apps grouped by category directory. Useful for agent
@@ -676,7 +723,7 @@ def list_installed_apps() -> dict:
     b = _get_bridge()
     categories = b.send("storage list /ext/apps")
     _raise_on_cli_failure(categories)
-    result: dict = {"categories": {}, "total_apps": 0}
+    result = InstalledApps(categories={}, total_apps=0)
 
     for line in categories.splitlines():
         line = line.strip()
@@ -694,8 +741,8 @@ def list_installed_apps() -> dict:
                 if name.endswith(".fap"):
                     faps.append(name)
         if faps:
-            result["categories"][cat] = sorted(faps)
-            result["total_apps"] += len(faps)
+            result.categories[cat] = sorted(faps)
+            result.total_apps += len(faps)
     return result
 
 
@@ -715,7 +762,7 @@ def flipper_press_key(key: str, press_type: str = "short") -> str:
 
 
 @_tool(_CONTROL)
-def flipper_hold_key(key: str, duration_s: float) -> str:
+def flipper_hold_key(key: str, duration_s: Annotated[float, Field(ge=0, le=30)]) -> str:
     """Press and hold a key for ``duration_s`` seconds, then release.
 
     Uses explicit press/release events so the hold duration is wall-clock
@@ -725,7 +772,9 @@ def flipper_hold_key(key: str, duration_s: float) -> str:
 
 
 @_tool(_CONTROL)
-def flipper_input_sequence(sequence: str, step_delay_s: float = 0.05) -> list[str]:
+def flipper_input_sequence(
+    sequence: str, step_delay_s: Annotated[float, Field(ge=0, le=5)] = 0.05
+) -> list[str]:
     """Run a mini-DSL sequence of keypresses / waits against the Flipper UI.
 
     Syntax (comma-separated steps):
@@ -833,46 +882,57 @@ def ir_universal_send(category: str, button: str) -> str:
 # -- protocol registry ------------------------------------------------------
 
 
-@_tool(_READ)
+class ProtocolSummary(BaseModel):
+    id: str
+    name: str
+    category: str
+    typical_frequencies_hz: list[int]
+    typical_devices: list[str]
+    packs: list[str]
+
+
+@_tool(_READ, device=False)
 def registry_list(
     category: str | None = None,
     pack: str | None = None,
-) -> list[dict]:
+) -> list[ProtocolSummary]:
     """List known protocols in the bundled registry.
 
     category: filter to one of subghz | ir | nfc | lfrfid | ble
     pack: filter to a vertical pack, e.g. "garage", "access-control"
     """
     return [
-        {
-            "id": p.id,
-            "name": p.name,
-            "category": p.category,
-            "typical_frequencies_hz": p.typical_frequencies_hz,
-            "typical_devices": p.typical_devices,
-            "packs": p.packs,
-        }
+        ProtocolSummary.model_validate(p, from_attributes=True)
         for p in get_registry().list(category=category, pack=pack)
     ]
 
 
-@_tool(_READ)
-def registry_describe(protocol_id: str) -> dict:
+@_tool(_READ, device=False)
+def registry_describe(protocol_id: str) -> Protocol:
     """Return the full registry entry for one protocol id."""
     proto = get_registry().get(protocol_id)
     if proto is None:
         raise RegistryError(
             f"Unknown protocol {protocol_id!r}. Call registry_list() to see what's available."
         )
-    return proto.model_dump()
+    return proto
+
+
+class SubGhzScan(BaseModel):
+    frequency_hz: int
+    duration_s: float
+    device: int
+    match_count: int
+    matches: list[MatchSummary]
+    raw_output: str
 
 
 @_tool(_LISTEN)
 def scan_and_identify(
-    frequency_hz: int,
-    duration_s: float = 15.0,
-    device: int | None = None,
-) -> dict:
+    frequency_hz: SubGhzHz,
+    duration_s: StreamSeconds = 15.0,
+    device: RadioDevice | None = None,
+) -> SubGhzScan:
     """Listen on SubGHz, then fingerprint the capture against the registry.
 
     One-shot workflow: runs ``subghz rx``, collects output for ``duration_s``,
@@ -891,47 +951,70 @@ def scan_and_identify(
     dev = device if device is not None else _DEFAULT_DEVICE
     raw = _get_bridge().stream(f"subghz rx {frequency_hz} {dev}", duration_s)
     matches = get_registry().fingerprint(raw, category="subghz")
-    return {
-        "frequency_hz": frequency_hz,
-        "duration_s": duration_s,
-        "device": dev,
-        "match_count": len(matches),
-        "matches": [m.to_dict() for m in matches],
-        "raw_output": raw,
-    }
+    return SubGhzScan(
+        frequency_hz=frequency_hz,
+        duration_s=duration_s,
+        device=dev,
+        match_count=len(matches),
+        matches=[m.summary() for m in matches],
+        raw_output=raw,
+    )
+
+
+class IrScan(BaseModel):
+    duration_s: float
+    match_count: int
+    matches: list[MatchSummary]
+    raw_output: str
 
 
 @_tool(_LISTEN)
-def ir_scan_and_identify(duration_s: float = 10.0) -> dict:
+def ir_scan_and_identify(duration_s: StreamSeconds = 10.0) -> IrScan:
     """Listen for IR, then fingerprint the capture against the registry."""
     raw = _get_bridge().stream("ir rx", duration_s)
     matches = get_registry().fingerprint(raw, category="ir")
-    return {
-        "duration_s": duration_s,
-        "match_count": len(matches),
-        "matches": [m.to_dict() for m in matches],
-        "raw_output": raw,
-    }
+    return IrScan(
+        duration_s=duration_s,
+        match_count=len(matches),
+        matches=[m.summary() for m in matches],
+        raw_output=raw,
+    )
 
 
 # -- remote registry sync ---------------------------------------------------
 
 
-@_tool(_READ)
-def registry_status() -> dict:
+class RegistryStatus(BaseModel):
+    bundled_count: int
+    bundled: list[str]
+    user_installed_count: int
+    user_installed: list[str]
+    cache_dir: str
+    total_loaded: int
+
+
+@_tool(_READ, device=False)
+def registry_status() -> RegistryStatus:
     """Show registry state: bundled protocols, user-installed, cache location."""
-    return {
-        "bundled_count": len(bundled_protocols()),
-        "bundled": bundled_protocols(),
-        "user_installed_count": len(installed_protocols()),
-        "user_installed": installed_protocols(),
-        "cache_dir": str(user_cache_dir()),
-        "total_loaded": len(get_registry().all()),
-    }
+    bundled = bundled_protocols()
+    installed = installed_protocols()
+    return RegistryStatus(
+        bundled_count=len(bundled),
+        bundled=bundled,
+        user_installed_count=len(installed),
+        user_installed=installed,
+        cache_dir=str(user_cache_dir()),
+        total_loaded=len(get_registry().all()),
+    )
 
 
-@_tool(_LISTEN)
-def registry_fetch_index(index_url: str) -> list[dict]:
+class IndexEntry(RemoteProtocolEntry):
+    bundled: bool
+    installed: bool
+
+
+@_tool(_LISTEN, device=False)
+def registry_fetch_index(index_url: str) -> list[IndexEntry]:
     """Fetch a remote registry index and list what's available.
 
     index_url: HTTPS URL to a JSON index file following the flipper-rf-registry
@@ -942,23 +1025,24 @@ def registry_fetch_index(index_url: str) -> list[dict]:
     have_bundled = set(bundled_protocols())
     have_installed = set(installed_protocols())
     return [
-        {
-            "id": e.id,
-            "name": e.name,
-            "category": e.category,
-            "url": e.url,
-            "sha256": e.sha256,
-            "version": e.version,
-            "packs": e.packs,
-            "bundled": e.id in have_bundled,
-            "installed": e.id in have_installed,
-        }
+        IndexEntry(
+            **e.model_dump(),
+            bundled=e.id in have_bundled,
+            installed=e.id in have_installed,
+        )
         for e in idx.protocols
     ]
 
 
-@_tool(_INSTALL)
-def registry_install(index_url: str, protocol_id: str) -> dict:
+class InstallResult(BaseModel):
+    installed: str
+    path: str
+    sha256_verified: bool
+    source_index: str
+
+
+@_tool(_INSTALL, device=False)
+def registry_install(index_url: str, protocol_id: str) -> InstallResult:
     """Install one protocol from a remote index into the user cache.
 
     Downloads the JSON payload, verifies the SHA-256 checksum if present,
@@ -972,16 +1056,20 @@ def registry_install(index_url: str, protocol_id: str) -> dict:
         raise RegistryError(f"Protocol {protocol_id!r} not found in index {index_url}")
     path = install_from_entry(entry)
     reset_registry()
-    return {
-        "installed": protocol_id,
-        "path": str(path),
-        "sha256_verified": bool(entry.sha256),
-        "source_index": index_url,
-    }
+    return InstallResult(
+        installed=protocol_id,
+        path=str(path),
+        sha256_verified=bool(entry.sha256),
+        source_index=index_url,
+    )
 
 
-@_tool(_DESTRUCTIVE)
-def registry_remove(protocol_id: str) -> dict:
+class RemoveResult(BaseModel):
+    removed: str
+
+
+@_tool(_DESTRUCTIVE, device=False)
+def registry_remove(protocol_id: str) -> RemoveResult:
     """Remove a user-installed protocol from the cache.
 
     Bundled protocols (shipped with the package) cannot be removed — this only
@@ -993,7 +1081,7 @@ def registry_remove(protocol_id: str) -> dict:
             f"{protocol_id!r} is not in the user cache. Bundled-only protocols cannot be removed."
         )
     reset_registry()
-    return {"removed": protocol_id}
+    return RemoveResult(removed=protocol_id)
 
 
 # -- prompts ----------------------------------------------------------------
