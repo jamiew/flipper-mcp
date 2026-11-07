@@ -123,6 +123,8 @@ Run the checks in the README's
 - Don't add cloud dependencies. This tool runs 100% locally by design.
 - Don't silently retry or hide errors — an agent needs actionable error
   messages, not generic "something went wrong."
+- `.mcp.json` is the headless dev entry for agents; `tests/test_mcp_json.py`
+  launches it over stdio, so keep it working from any directory.
 
 ## License
 
