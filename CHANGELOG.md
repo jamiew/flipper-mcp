@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026-11-07 — 0.7.1
 
 - `flipper_interrupt` no longer waits behind a running capture. It stops the
   capture early, and the capture returns what it heard so far. Cancelling a
