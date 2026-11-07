@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-07 — 0.7.2
+
+- Removing a protocol while another registry call was loading the registry
+  could bring the removed protocol back. Loading, installing and removing now
+  share one registry lock, so a removed protocol stays gone. Downloads still
+  run outside the lock.
+
 ## 2026-11-07 — 0.7.1
 
 - `flipper_interrupt` no longer waits behind a running capture. It stops the
