@@ -226,18 +226,54 @@ def test_failed_storage_open_does_not_execute_content_as_commands(connected_brid
     assert not bridge.alive
 
 
-def test_stream_collects_output_until_interrupt_prompt(connected_bridge):
-    bridge, port = connected_bridge
+def _stream_until_stopped(port):
+    """A device that streams samples until Ctrl-C, then prints a prompt."""
+    started = threading.Event()
 
     def respond(payload):
         if payload == b"\x03":
             port.incoming.put(b"stopped\r\n>: ")
         else:
             port.incoming.put(payload + b"sample\r\n")
+            started.set()
 
     port.on_write = respond
+    return started
+
+
+def test_stream_collects_output_until_interrupt_prompt(connected_bridge):
+    bridge, port = connected_bridge
+    _stream_until_stopped(port)
     assert bridge.stream("listen", duration=0.05, quiet_ms=10) == "sample\nstopped"
     assert bridge.alive
+
+
+def test_interrupt_stops_an_active_stream_without_mixing_output(connected_bridge):
+    bridge, port = connected_bridge
+    started = _stream_until_stopped(port)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        capture = executor.submit(bridge.stream, "listen", 600.0, 1.0, 10)
+        assert started.wait(1.0)
+        assert bridge.interrupt(timeout=3.0) == "stopped"
+        assert capture.result(timeout=1.0) == "sample\nstopped"
+    assert port.writes == [b"listen\r\n", b"\x03", b"\x03"]
+    assert bridge.alive
+
+
+def test_cancelled_callback_stops_stream_early(monkeypatch):
+    port = FakeSerial()
+    _stream_until_stopped(port)
+    cancelled = threading.Event()
+    monkeypatch.setattr(bridge_module.serial, "Serial", lambda *args, **kwargs: port)
+    monkeypatch.setattr(FlipperBridge, "_handshake", lambda self: None)
+    bridge = FlipperBridge(port="fake", cancelled=cancelled.is_set)
+    try:
+        threading.Timer(0.05, cancelled.set).start()
+        assert bridge.stream("listen", duration=600.0, quiet_ms=10) == "sample\nstopped"
+        assert port.writes == [b"listen\r\n", b"\x03"]
+        assert bridge.alive
+    finally:
+        bridge.close()
 
 
 @pytest.mark.parametrize("content", ["first\r\n\tsecond", "first\nsecond\n"])

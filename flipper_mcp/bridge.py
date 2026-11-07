@@ -10,6 +10,9 @@ Design notes:
     interrupted before waiting for the prompt.
   - A reader thread owns serial reads; a separate transaction lock prevents
     callers from consuming or clearing each other's responses.
+  - ``interrupt()`` may run from another thread while a stream holds the
+    transaction lock. It asks the stream to stop early, then sends its own
+    Ctrl-C once the stream has released the link.
 """
 
 from __future__ import annotations
@@ -23,7 +26,7 @@ import re
 import sys
 import threading
 import time
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 
 import serial
 
@@ -48,7 +51,10 @@ class FlipperBridge:
         port: str | None = None,
         baudrate: int = 115200,
         read_timeout: float = 0.05,
+        cancelled: Callable[[], bool] | None = None,
     ) -> None:
+        # Polled while a stream runs; True ends the stream early.
+        self._cancelled = cancelled
         self.port = port or self._auto_detect()
         try:
             self._ser = serial.Serial(
@@ -73,6 +79,7 @@ class FlipperBridge:
         self._lock = threading.Lock()
         self._transaction_lock = threading.Lock()
         self._stop = threading.Event()
+        self._interrupt_requested = threading.Event()
         self._alive = threading.Event()
         self._alive.set()
         self._reader = threading.Thread(target=self._read_loop, name="flipper-reader", daemon=True)
@@ -260,14 +267,18 @@ class FlipperBridge:
         post_timeout: float = 5.0,
         quiet_ms: int = 300,
     ) -> str:
-        """Run a streaming command for `duration` seconds, Ctrl-C, return output."""
+        """Run a streaming command for up to `duration` seconds, Ctrl-C, return output.
+
+        The stream ends early when the device returns to the prompt, when
+        ``interrupt()`` runs on another thread, or when ``cancelled`` returns True.
+        """
         self._check_text(cmd)
         with self._transaction(post_timeout):
             self._drain()
             try:
                 self._write(cmd + "\r\n")
                 deadline = time.monotonic() + duration
-                while self.alive and not self._ends_with_prompt():
+                while self.alive and not self._ends_with_prompt() and not self._stop_requested():
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
                         break
@@ -278,19 +289,30 @@ class FlipperBridge:
             self._wait_quiet(post_timeout, quiet_ms)
             return self._clean(self._snapshot(), cmd)
 
-    def interrupt(self) -> str:
+    def _stop_requested(self) -> bool:
+        if self._interrupt_requested.is_set():
+            return True
+        return self._cancelled is not None and self._cancelled()
+
+    def interrupt(self, timeout: float = 10.0) -> str:
         """Send a lone Ctrl-C to recover from a stuck streaming command.
 
         Useful when an earlier call left the Flipper in a listening state
         (e.g. ``subghz rx_raw`` invoked via ``flipper_cli`` without a
-        terminating Ctrl-C). Returns whatever output the CLI emits while
-        closing out.
+        terminating Ctrl-C). An active ``stream()`` on another thread stops
+        early first, so this waits only for it to settle, not for its full
+        duration. Returns whatever output the CLI emits while closing out.
         """
-        with self._transaction(2.0):
-            self._drain()
-            self._write("\x03")
-            self._wait_quiet(timeout=2.0, quiet_ms=200)
-            return self._clean(self._snapshot())
+        self._interrupt_requested.set()
+        try:
+            with self._transaction(timeout):
+                self._interrupt_requested.clear()
+                self._drain()
+                self._write("\x03")
+                self._wait_quiet(timeout=2.0, quiet_ms=200)
+                return self._clean(self._snapshot())
+        finally:
+            self._interrupt_requested.clear()
 
     def write_file(
         self,
