@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026-11-07 — 0.7.0
 
 - Every tool now tells MCP clients whether it only reads, changes device
   state, deletes or overwrites data, or reaches the outside world (radio,

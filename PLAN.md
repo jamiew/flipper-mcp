@@ -4,7 +4,7 @@ Hardware testing paused September 22, 2026, and is not scheduled until the user 
 
 ## Current state
 
-- Released 0.6.0. Main uses the official MCP SDK 2.3; 64 tools with hint annotations and the `rf_triage` prompt.
+- Released 0.7.0. Main uses the official MCP SDK 2.3; 64 tools with hint annotations and the `rf_triage` prompt.
 - User updated the Flipper to Momentum **mntm-012**, commit `e1784e74`, built December 31, 2025. This is the observed installed version, not a check of the latest release.
 - All 64 tools were invoked on mntm-010; 63 were re-invoked on mntm-012, including ten safety-gate checks. The clock setter was deliberately skipped.
 - JVC **Power and Volume Up** produced distinct, repeatable RAW IR captures. One 69-sample Volume Up burst was sent at an assumed 38 kHz and 33% duty cycle. Firmware accepted it; **the user has not confirmed any TV response**.
