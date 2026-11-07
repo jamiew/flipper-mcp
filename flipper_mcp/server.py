@@ -20,7 +20,9 @@ from functools import wraps
 
 from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+from mcp.types import ToolAnnotations
 
+from . import __version__
 from .bridge import FlipperBridge, FlipperError
 from .registry import (
     RegistryError,
@@ -45,7 +47,16 @@ from .ui import (
     subghz_read_start_ui,
 )
 
-mcp = MCPServer("flipper")
+mcp = MCPServer(
+    "flipper",
+    version=__version__,
+    instructions=(
+        "Drives a Flipper Zero over USB serial. Tools that transmit, emulate, write tags "
+        "or power-cycle refuse unless the server runs with FLIPPER_ENABLE_TX=1. A running "
+        "on-device app holds the radio, so call workflow_close_app before CLI receive tools. "
+        "Use flipper_cli only when no dedicated tool fits."
+    ),
+)
 
 # Per-user default radio device for SubGHz commands.
 #   0 = internal CC1101 (default for everyone without an add-on)
@@ -97,8 +108,25 @@ def _read_file(path: str) -> str:
     return content
 
 
-def _tool():
-    """Keep complete tool operations atomic across SDK worker threads."""
+# Hints let MCP clients auto-approve reads and confirm risky calls. They are
+# advisory: FLIPPER_ENABLE_TX in safety.py is what actually blocks transmit.
+_READ = ToolAnnotations(read_only_hint=True, open_world_hint=False)
+# Receives from the outside world (radio, IR, NFC, I2C bus, remote registry).
+_LISTEN = ToolAnnotations(read_only_hint=True, open_world_hint=True)
+_CONTROL = ToolAnnotations(read_only_hint=False, destructive_hint=False, open_world_hint=False)
+_DESTRUCTIVE = ToolAnnotations(read_only_hint=False, destructive_hint=True, open_world_hint=False)
+_TRANSMIT = ToolAnnotations(read_only_hint=False, destructive_hint=False, open_world_hint=True)
+_WRITE_TAG = ToolAnnotations(read_only_hint=False, destructive_hint=True, open_world_hint=True)
+_INSTALL = ToolAnnotations(
+    read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True
+)
+
+
+def _tool(annotations: ToolAnnotations | None):
+    """Keep complete tool operations atomic across SDK worker threads.
+
+    ``None`` leaves the spec defaults (destructive, open world) for the raw CLI.
+    """
 
     def register(function):
         @wraps(function)
@@ -115,7 +143,7 @@ def _tool():
             except (FlipperError, RegistryError, ValueError) as exc:
                 raise ToolError(str(exc)) from exc
 
-        return mcp.tool()(serialized)
+        return mcp.tool(annotations=annotations)(serialized)
 
     return register
 
@@ -137,19 +165,19 @@ def _hex_arg(s: str) -> str:
 # -- discovery / info ------------------------------------------------------
 
 
-@_tool()
+@_tool(_READ)
 def flipper_info() -> str:
     """Show device info: firmware version, name, hardware, UID, battery."""
     return _get_bridge().send("device_info")
 
 
-@_tool()
+@_tool(_READ)
 def flipper_help() -> str:
     """List every CLI command the Flipper supports. Useful for exploration."""
     return _get_bridge().send("help")
 
 
-@_tool()
+@_tool(None)
 def flipper_cli(command: str, timeout_s: float = 10.0) -> str:
     """Run an arbitrary Flipper CLI command.
 
@@ -164,7 +192,7 @@ def flipper_cli(command: str, timeout_s: float = 10.0) -> str:
 # -- storage ----------------------------------------------------------------
 
 
-@_tool()
+@_tool(_READ)
 def storage_list(path: str = "/ext") -> str:
     """List files and directories on the Flipper. Default: /ext (SD root).
 
@@ -178,19 +206,19 @@ def storage_list(path: str = "/ext") -> str:
     return _get_bridge().send(f"storage list {path}")
 
 
-@_tool()
+@_tool(_READ)
 def storage_info(path: str = "/ext") -> str:
     """Show free/total space for the given storage mount (/int or /ext)."""
     return _get_bridge().send(f"storage info {path}")
 
 
-@_tool()
+@_tool(_READ)
 def storage_read(path: str) -> str:
     """Read a file's text contents from the Flipper filesystem."""
     return _read_file(path)
 
 
-@_tool()
+@_tool(_READ)
 def storage_stat(path: str) -> str:
     """Show metadata for a single file or directory on the Flipper."""
     return _get_bridge().send(f"storage stat {path}")
@@ -199,7 +227,7 @@ def storage_stat(path: str) -> str:
 # -- SubGHz radio -----------------------------------------------------------
 
 
-@_tool()
+@_tool(_LISTEN)
 def subghz_rx(
     frequency_hz: int,
     duration_s: float = 10.0,
@@ -224,7 +252,7 @@ def subghz_rx(
     return _get_bridge().stream(f"subghz rx {frequency_hz} {dev}", duration_s)
 
 
-@_tool()
+@_tool(_TRANSMIT)
 def subghz_tx_from_file(sub_file_path: str) -> str:
     """Transmit a saved .sub file from the Flipper SD card.
 
@@ -239,7 +267,7 @@ def subghz_tx_from_file(sub_file_path: str) -> str:
     return _get_bridge().send(f"subghz tx_from_file {sub_file_path}", timeout=30.0)
 
 
-@_tool()
+@_tool(_READ)
 def subghz_decode_raw(sub_file_path: str, duration_s: float = 15.0) -> str:
     """Replay a raw .sub capture through the decoder and report matches.
 
@@ -254,13 +282,13 @@ def subghz_decode_raw(sub_file_path: str, duration_s: float = 15.0) -> str:
 # -- NFC / RFID -------------------------------------------------------------
 
 
-@_tool()
+@_tool(_LISTEN)
 def nfc_detect(duration_s: float = 5.0) -> str:
     """Scan for NFC tags nearby for `duration_s` seconds."""
     return _get_bridge().stream("nfc detect", duration_s)
 
 
-@_tool()
+@_tool(_TRANSMIT)
 def nfc_emulate(file_path: str = "", duration_s: float = 15.0) -> str:
     """Emulate a saved .nfc tag (or the last-read tag if no path) for a duration.
 
@@ -275,7 +303,7 @@ def nfc_emulate(file_path: str = "", duration_s: float = 15.0) -> str:
 # -- Infrared ---------------------------------------------------------------
 
 
-@_tool()
+@_tool(_LISTEN)
 def ir_rx(duration_s: float = 10.0) -> str:
     """Listen for IR remote signals for `duration_s` seconds.
 
@@ -284,7 +312,7 @@ def ir_rx(duration_s: float = 10.0) -> str:
     return _get_bridge().stream("ir rx", duration_s)
 
 
-@_tool()
+@_tool(_TRANSMIT)
 def ir_tx(protocol: str, address: str, command: str) -> str:
     """Transmit an IR signal using a known protocol.
 
@@ -304,25 +332,25 @@ def ir_tx(protocol: str, address: str, command: str) -> str:
 # -- system -----------------------------------------------------------------
 
 
-@_tool()
+@_tool(_READ)
 def ps() -> str:
     """List running apps / tasks on the Flipper."""
     return _get_bridge().stream("top", duration=1.0)
 
 
-@_tool()
+@_tool(_READ)
 def free() -> str:
     """Show free RAM on the Flipper."""
     return _get_bridge().send("free")
 
 
-@_tool()
+@_tool(_READ)
 def uptime() -> str:
     """Show how long the Flipper has been running since last boot."""
     return _get_bridge().send("uptime")
 
 
-@_tool()
+@_tool(_DESTRUCTIVE)
 def power(action: str) -> str:
     """Control device power. action: off | reboot | reboot2dfu | otg_on | otg_off.
 
@@ -347,20 +375,20 @@ def power(action: str) -> str:
     return _get_bridge().send(cmd)
 
 
-@_tool()
+@_tool(_READ)
 def power_info() -> str:
     """Show battery / charging / power state (voltage, current, temperature, health)."""
     out = _get_bridge().send("info power")
     return out if out.strip() else _get_bridge().send("power info")
 
 
-@_tool()
+@_tool(_READ)
 def datetime_get() -> str:
     """Read the Flipper's real-time clock."""
     return _get_bridge().send("date")
 
 
-@_tool()
+@_tool(_CONTROL)
 def datetime_set(iso: str) -> str:
     """Set the Flipper's clock from an ISO timestamp, e.g. 2026-08-09T14:30:00.
 
@@ -371,13 +399,13 @@ def datetime_set(iso: str) -> str:
     return _get_bridge().send(f"date {stamp}")
 
 
-@_tool()
+@_tool(_LISTEN)
 def i2c_scan() -> str:
     """Scan the GPIO I2C bus (PC0=SCL, PC1=SDA) and report responding addresses."""
     return _get_bridge().send("i2c")
 
 
-@_tool()
+@_tool(_CONTROL)
 def led(r: int = 0, g: int = 0, b: int = 0) -> str:
     """Set the RGB LED on the Flipper. Each channel: 0-255.
 
@@ -392,7 +420,7 @@ def led(r: int = 0, g: int = 0, b: int = 0) -> str:
     ).strip()
 
 
-@_tool()
+@_tool(_CONTROL)
 def vibro(on: bool) -> str:
     """Pulse the vibration motor on or off."""
     return _get_bridge().send(f"vibro {1 if on else 0}")
@@ -401,7 +429,7 @@ def vibro(on: bool) -> str:
 # -- storage mutation (v0.4) -----------------------------------------------
 
 
-@_tool()
+@_tool(_DESTRUCTIVE)
 def storage_write(path: str, content: str) -> str:
     """Write text content to a file on the Flipper's SD card.
 
@@ -412,25 +440,25 @@ def storage_write(path: str, content: str) -> str:
     return _get_bridge().write_file(path, content)
 
 
-@_tool()
+@_tool(_DESTRUCTIVE)
 def storage_remove(path: str) -> str:
     """Delete a file or empty directory on the Flipper."""
     return _get_bridge().send(f"storage remove {path}")
 
 
-@_tool()
+@_tool(_CONTROL)
 def storage_mkdir(path: str) -> str:
     """Create a new directory on the Flipper."""
     return _get_bridge().send(f"storage mkdir {path}")
 
 
-@_tool()
+@_tool(_DESTRUCTIVE)
 def storage_rename(old_path: str, new_path: str) -> str:
     """Rename or move a file/directory on the Flipper."""
     return _get_bridge().send(f"storage rename {old_path} {new_path}")
 
 
-@_tool()
+@_tool(_READ)
 def storage_md5(path: str) -> str:
     """Compute the MD5 checksum of a file on the Flipper (firmware-side)."""
     return _get_bridge().send(f"storage md5 {path}")
@@ -439,7 +467,7 @@ def storage_md5(path: str) -> str:
 # -- SubGHz raw capture (v0.4) ---------------------------------------------
 
 
-@_tool()
+@_tool(_LISTEN)
 def subghz_rx_raw(frequency_hz: int, duration_s: float = 10.0) -> str:
     """Capture raw pulse timings on a SubGHz frequency, no decoding.
 
@@ -455,7 +483,7 @@ def subghz_rx_raw(frequency_hz: int, duration_s: float = 10.0) -> str:
     return _get_bridge().stream(f"subghz rx_raw {frequency_hz}", duration_s)
 
 
-@_tool()
+@_tool(_TRANSMIT)
 def subghz_chat(
     frequency_hz: int = 433920000,
     duration_s: float = 30.0,
@@ -474,7 +502,7 @@ def subghz_chat(
 # -- RFID / iButton (v0.4) -------------------------------------------------
 
 
-@_tool()
+@_tool(_LISTEN)
 def rfid_read(duration_s: float = 10.0) -> str:
     """Scan for 125 kHz LF-RFID cards for `duration_s` seconds.
 
@@ -483,7 +511,7 @@ def rfid_read(duration_s: float = 10.0) -> str:
     return _get_bridge().stream("rfid read", duration_s)
 
 
-@_tool()
+@_tool(_WRITE_TAG)
 def rfid_write(key_type: str, key_data: str) -> str:
     """Write a 125 kHz LF-RFID tag. key_type: EM4100 | H10301 | Indala26.
 
@@ -493,7 +521,7 @@ def rfid_write(key_type: str, key_data: str) -> str:
     return _get_bridge().send(f"rfid write {key_type} {key_data}")
 
 
-@_tool()
+@_tool(_TRANSMIT)
 def rfid_emulate(key_type: str, key_data: str, duration_s: float = 15.0) -> str:
     """Emulate a 125 kHz LF-RFID tag for a duration. Gated behind FLIPPER_ENABLE_TX.
 
@@ -503,13 +531,13 @@ def rfid_emulate(key_type: str, key_data: str, duration_s: float = 15.0) -> str:
     return _get_bridge().stream(f"rfid emulate {key_type} {key_data}", duration_s)
 
 
-@_tool()
+@_tool(_LISTEN)
 def ibutton_read(duration_s: float = 10.0) -> str:
     """Scan for iButton / 1-Wire keys for `duration_s` seconds."""
     return _get_bridge().stream("ikey read", duration_s)
 
 
-@_tool()
+@_tool(_WRITE_TAG)
 def ibutton_write(key_data: str) -> str:
     """Write a Dallas iButton key (only Dallas is writable). Gated behind FLIPPER_ENABLE_TX.
 
@@ -519,7 +547,7 @@ def ibutton_write(key_data: str) -> str:
     return _get_bridge().send(f"ikey write Dallas {key_data}")
 
 
-@_tool()
+@_tool(_TRANSMIT)
 def ibutton_emulate(key_type: str, key_data: str, duration_s: float = 15.0) -> str:
     """Emulate an iButton key for a duration. Gated behind FLIPPER_ENABLE_TX.
 
@@ -532,7 +560,7 @@ def ibutton_emulate(key_type: str, key_data: str, duration_s: float = 15.0) -> s
 # -- GPIO (v0.4) -----------------------------------------------------------
 
 
-@_tool()
+@_tool(_READ)
 def gpio_read(pin: str) -> str:
     """Read the current digital state of a GPIO pin.
 
@@ -541,13 +569,13 @@ def gpio_read(pin: str) -> str:
     return _get_bridge().send(f"gpio read {pin}")
 
 
-@_tool()
+@_tool(_CONTROL)
 def gpio_write(pin: str, value: int) -> str:
     """Set a GPIO pin high (1) or low (0); configure output mode separately."""
     return _get_bridge().send(f"gpio set {pin} {int(bool(value))}")
 
 
-@_tool()
+@_tool(_CONTROL)
 def gpio_mode(pin: str, mode: str) -> str:
     """Configure a GPIO pin's direction/mode.
 
@@ -562,7 +590,7 @@ def gpio_mode(pin: str, mode: str) -> str:
 # -- Loader / app control (v0.4) -------------------------------------------
 
 
-@_tool()
+@_tool(_CONTROL)
 def loader_open(app_path_or_id: str) -> str:
     """Launch an app on the Flipper by path or built-in ID.
 
@@ -576,19 +604,19 @@ def loader_open(app_path_or_id: str) -> str:
     return _get_bridge().send(f"loader open {app_path_or_id}", timeout=15.0)
 
 
-@_tool()
+@_tool(_CONTROL)
 def loader_close() -> str:
     """Close the currently running app on the Flipper."""
     return _get_bridge().send("loader close")
 
 
-@_tool()
+@_tool(_READ)
 def loader_info() -> str:
     """Show what app is currently running on the Flipper."""
     return _get_bridge().send("loader info")
 
 
-@_tool()
+@_tool(_READ)
 def loader_list() -> str:
     """List all built-in apps launchable via ``loader open``."""
     return _get_bridge().send("loader list")
@@ -597,7 +625,7 @@ def loader_list() -> str:
 # -- Recovery + introspection (v0.4) ---------------------------------------
 
 
-@_tool()
+@_tool(_CONTROL)
 def flipper_interrupt() -> str:
     """Send a Ctrl-C to the Flipper CLI to recover from a stuck streaming command.
 
@@ -607,7 +635,7 @@ def flipper_interrupt() -> str:
     return _get_bridge().interrupt()
 
 
-@_tool()
+@_tool(_READ)
 def flipper_file_inspect(path: str) -> dict:
     """Read a file on the Flipper and classify it by its Filetype header.
 
@@ -640,7 +668,7 @@ def flipper_file_inspect(path: str) -> dict:
     return meta
 
 
-@_tool()
+@_tool(_READ)
 def list_installed_apps() -> dict:
     """Enumerate installed FAP apps under ``/ext/apps/*/*.fap``.
 
@@ -675,7 +703,7 @@ def list_installed_apps() -> dict:
 # -- UI automation (v0.5) --------------------------------------------------
 
 
-@_tool()
+@_tool(_CONTROL)
 def flipper_press_key(key: str, press_type: str = "short") -> str:
     """Send a synthetic keypress to the Flipper UI.
 
@@ -687,7 +715,7 @@ def flipper_press_key(key: str, press_type: str = "short") -> str:
     return press_key(_get_bridge(), key, press_type=press_type)
 
 
-@_tool()
+@_tool(_CONTROL)
 def flipper_hold_key(key: str, duration_s: float) -> str:
     """Press and hold a key for ``duration_s`` seconds, then release.
 
@@ -697,7 +725,7 @@ def flipper_hold_key(key: str, duration_s: float) -> str:
     return hold_key(_get_bridge(), key, duration_s)
 
 
-@_tool()
+@_tool(_CONTROL)
 def flipper_input_sequence(sequence: str, step_delay_s: float = 0.05) -> list[str]:
     """Run a mini-DSL sequence of keypresses / waits against the Flipper UI.
 
@@ -717,7 +745,7 @@ def flipper_input_sequence(sequence: str, step_delay_s: float = 0.05) -> list[st
 # -- workflow macros (v0.5) ------------------------------------------------
 
 
-@_tool()
+@_tool(_CONTROL)
 def workflow_subghz_read_start() -> dict:
     """Launch the Sub-GHz app and navigate into Read mode in one call.
 
@@ -728,19 +756,19 @@ def workflow_subghz_read_start() -> dict:
     return subghz_read_start_ui(_get_bridge())
 
 
-@_tool()
+@_tool(_CONTROL)
 def workflow_nfc_read_start() -> dict:
     """Launch the NFC app and navigate into Read mode in one call."""
     return nfc_read_start_ui(_get_bridge())
 
 
-@_tool()
+@_tool(_CONTROL)
 def workflow_infrared_learn_start() -> dict:
     """Launch the Infrared app and navigate into Learn New Remote."""
     return infrared_learn_start_ui(_get_bridge())
 
 
-@_tool()
+@_tool(_CONTROL)
 def workflow_close_app() -> dict:
     """Close any app currently running on the Flipper; return to main screen.
 
@@ -775,7 +803,7 @@ _UNIVERSAL_CATEGORIES = {
 }
 
 
-@_tool()
+@_tool(_READ)
 def ir_universal_list(category: str) -> str:
     """List the buttons available for a universal-remote category.
 
@@ -787,7 +815,7 @@ def ir_universal_list(category: str) -> str:
     return _get_bridge().send(f"ir universal list {cat}")
 
 
-@_tool()
+@_tool(_TRANSMIT)
 def ir_universal_send(category: str, button: str) -> str:
     """Transmit a universal-remote IR button from the firmware's built-in DB.
 
@@ -808,7 +836,7 @@ def ir_universal_send(category: str, button: str) -> str:
 # -- registry (L2) ---------------------------------------------------------
 
 
-@_tool()
+@_tool(_READ)
 def registry_list(
     category: str | None = None,
     pack: str | None = None,
@@ -831,7 +859,7 @@ def registry_list(
     ]
 
 
-@_tool()
+@_tool(_READ)
 def registry_describe(protocol_id: str) -> dict:
     """Return the full registry entry for one protocol id."""
     proto = get_registry().get(protocol_id)
@@ -843,7 +871,7 @@ def registry_describe(protocol_id: str) -> dict:
     return proto.model_dump()
 
 
-@_tool()
+@_tool(_LISTEN)
 def scan_and_identify(
     frequency_hz: int,
     duration_s: float = 15.0,
@@ -877,7 +905,7 @@ def scan_and_identify(
     }
 
 
-@_tool()
+@_tool(_LISTEN)
 def ir_scan_and_identify(duration_s: float = 10.0) -> dict:
     """Listen for IR, then fingerprint the capture against the registry."""
     raw = _get_bridge().stream("ir rx", duration_s)
@@ -893,7 +921,7 @@ def ir_scan_and_identify(duration_s: float = 10.0) -> dict:
 # -- remote registry sync (L3 proper) --------------------------------------
 
 
-@_tool()
+@_tool(_READ)
 def registry_status() -> dict:
     """Show registry state: bundled protocols, user-installed, cache location."""
     return {
@@ -906,7 +934,7 @@ def registry_status() -> dict:
     }
 
 
-@_tool()
+@_tool(_LISTEN)
 def registry_fetch_index(index_url: str) -> list[dict]:
     """Fetch a remote registry index and list what's available.
 
@@ -933,7 +961,7 @@ def registry_fetch_index(index_url: str) -> list[dict]:
     ]
 
 
-@_tool()
+@_tool(_INSTALL)
 def registry_install(index_url: str, protocol_id: str) -> dict:
     """Install one protocol from a remote index into the user cache.
 
@@ -956,7 +984,7 @@ def registry_install(index_url: str, protocol_id: str) -> dict:
     }
 
 
-@_tool()
+@_tool(_DESTRUCTIVE)
 def registry_remove(protocol_id: str) -> dict:
     """Remove a user-installed protocol from the cache.
 

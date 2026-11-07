@@ -6,13 +6,16 @@ Setup and commands live in [README.md](../README.md). Current work is in
 
 ## Runtime
 
-- Use official `mcp.server.MCPServer` from `mcp>=2.2,<3`, not standalone FastMCP.
-- `uv sync --locked --extra dev` installs the tracked lockfile. `.mcp.json`
+- Use official `mcp.server.MCPServer` from `mcp>=2.3,<3`, not standalone FastMCP.
+- `uv sync --locked` installs the tracked lockfile, including the dev group. `.mcp.json`
   launches `uv run --no-sync flipper-mcp`; restart after code/dependency changes.
 - Connection is lazy. A fresh stdio client can enumerate 64 tools and the
   `rf_triage` prompt without opening USB.
 - SDK v2 executes sync tools on worker threads. Serialize complete tool
   operations as well as serial transactions; the device has one CLI session.
+- Every tool declares MCP hint annotations (read-only, destructive, open
+  world) so clients can auto-approve reads and confirm writes or transmits.
+  Hints are advisory; `FLIPPER_ENABLE_TX` is the real transmit gate.
 
 ## Transport invariants
 
