@@ -8,11 +8,11 @@ MCP Python SDK v2, serialized USB transactions, and guarded transmission.
 
 ## Current status
 
-Checked September 22, 2026, on **Momentum mntm-012**:
+Hardware last checked September 22, 2026, on **Momentum mntm-012**:
 
 - 64 tools, one triage prompt, and 13 bundled protocol definitions.
-- 132 automated tests and Ruff passed. Re-invoked 63 tools after the firmware
-  update, including safety refusals, not 63 successful physical tests.
+- Re-invoked 63 tools after the firmware update, including safety refusals,
+  not 63 successful physical tests.
 - Storage, device controls, IR/LF-RFID/iButton/SubGHz reception, and registry
   operations respond. Installed apps: 195.
 - JVC Power and Volume Up were captured as RAW IR. One Volume Up replay was
@@ -132,6 +132,7 @@ under `$XDG_DATA_HOME/flipper-mcp/protocols` or
 ```bash
 uv sync --locked
 uv run --no-sync ruff check flipper_mcp tests
+uv run --no-sync ruff format --check flipper_mcp tests
 uv run --no-sync ty check
 uv run --no-sync pytest
 ```

@@ -1,12 +1,12 @@
 # Resume plan
 
-Paused September 22, 2026. No further hardware testing is scheduled until the user returns.
+Hardware testing paused September 22, 2026, and is not scheduled until the user returns. Host-side work since then is in the [changelog](CHANGELOG.md).
 
 ## Current state
 
-- Local MCP modernization is committed in `3553ba7`. Official MCP SDK 2.2.0; 64 tools and the `rf_triage` prompt.
+- Released 0.6.0. Main uses the official MCP SDK 2.3; 64 tools with hint annotations and the `rf_triage` prompt.
 - User updated the Flipper to Momentum **mntm-012**, commit `e1784e74`, built December 31, 2025. This is the observed installed version, not a check of the latest release.
-- **132 tests and Ruff passed.** All 64 tools were invoked on mntm-010; 63 were re-invoked on mntm-012, including ten safety-gate checks. The clock setter was deliberately skipped.
+- All 64 tools were invoked on mntm-010; 63 were re-invoked on mntm-012, including ten safety-gate checks. The clock setter was deliberately skipped.
 - JVC **Power and Volume Up** produced distinct, repeatable RAW IR captures. One 69-sample Volume Up burst was sent at an assumed 38 kHz and 33% duty cycle. Firmware accepted it; **the user has not confirmed any TV response**.
 - TX was enabled only in an exited one-shot process. The normal MCP's disabled TX gate was verified afterward. `.mcp.json` was not changed.
 - Last observed device state: connected, no app running, LED/vibration off, PA7 input. Temporary storage and registry fixtures were removed. No SubGHz replay, credential writing, or emulation occurred.

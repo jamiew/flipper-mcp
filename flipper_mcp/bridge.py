@@ -235,12 +235,6 @@ class FlipperBridge:
         if self._reader is not threading.current_thread():
             self._reader.join(timeout=1.0)
 
-    def __enter__(self) -> FlipperBridge:
-        return self
-
-    def __exit__(self, *exc: object) -> None:
-        self.close()
-
     # -- public API ---------------------------------------------------------
 
     @staticmethod
@@ -356,6 +350,9 @@ def smoke() -> int:
     print(f"connected: {bridge.port}")
     try:
         output = bridge.send(args.cmd)
+    except FlipperError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
     finally:
         bridge.close()
 

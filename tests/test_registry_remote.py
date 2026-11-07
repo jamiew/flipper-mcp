@@ -1,12 +1,7 @@
 """Tests for the remote registry sync path.
 
 Uses a local HTTP server and a tmp user cache so these tests never reach the
-network and never touch the real user cache. Verifies:
-  - index fetch + parse
-  - install validates SHA-256
-  - install rejects id mismatch
-  - cache overlay: user-installed entry overrides bundled same-id entry
-  - uninstall works
+network and never touch the real user cache.
 """
 
 from __future__ import annotations
@@ -119,17 +114,29 @@ def test_fetch_index_reads_valid_json(http_server):
     assert result.protocols[0].id == "test-remote-proto"
 
 
-def test_fetch_index_rejects_malformed(http_server):
+@pytest.mark.parametrize("body", ['{"schema_version": "not-a-number"}', "[]", "not json"])
+def test_fetch_index_rejects_malformed(http_server, body):
     directory, base_url = http_server
-    (directory / "bad.json").write_text('{"schema_version": "not-a-number"}')
+    (directory / "bad.json").write_text(body)
     with pytest.raises(RegistryError):
         fetch_index(f"{base_url}/bad.json")
 
 
-# -- install ----------------------------------------------------------------
+def test_fetch_failures_are_registry_errors(http_server):
+    _, base_url = http_server
+    for url in (f"{base_url}/missing.json", "http://127.0.0.1:9/index.json"):
+        with pytest.raises(RegistryError, match="Could not fetch"):
+            fetch_index(url)
 
 
-def test_install_writes_file_and_verifies_sha256(http_server, isolated_cache, tmp_path):
+def test_fetch_refuses_non_http_urls(tmp_path):
+    index = tmp_path / "index.json"
+    index.write_text('{"protocols": []}')
+    with pytest.raises(RegistryError, match="non-http"):
+        fetch_index(index.as_uri())
+
+
+def test_install_writes_file_and_verifies_sha256(http_server, isolated_cache):
     directory, base_url = http_server
     _, sha = _write_protocol(directory, SAMPLE_PROTOCOL)
     entry = RemoteProtocolEntry(
@@ -190,7 +197,7 @@ def test_user_cache_overrides_bundled(http_server, isolated_cache):
     isolated_cache.mkdir(parents=True, exist_ok=True)
     (isolated_cache / "princeton.json").write_text(json.dumps(override))
 
-    r = Registry.load(include_user_cache=True)
+    r = Registry.load()
     overridden = r.get("princeton")
     assert overridden is not None
     assert overridden.name == "USER-OVERRIDE princeton"

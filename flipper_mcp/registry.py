@@ -1,4 +1,4 @@
-"""Protocol registry — the L2 layer.
+"""Protocol registry.
 
 Each bundled JSON file under ``flipper_mcp/protocols/`` describes one
 radio / IR / NFC protocol: typical frequencies, modulation, a small set of
@@ -15,13 +15,15 @@ from __future__ import annotations
 
 import builtins
 import hashlib
+import http.client
 import importlib.resources
-import json
 import os
 import re
 import urllib.parse
 import urllib.request
+from collections.abc import Iterator
 from dataclasses import dataclass
+from importlib.resources.abc import Traversable
 from pathlib import Path
 
 from pydantic import BaseModel, Field, ValidationError
@@ -59,6 +61,17 @@ class Protocol(BaseModel):
     packs: list[str] = Field(default_factory=list)
 
 
+_BUNDLED_DIR = importlib.resources.files("flipper_mcp") / "protocols"
+
+
+def _json_files(directory: Traversable) -> Iterator[Traversable]:
+    return (entry for entry in directory.iterdir() if entry.name.endswith(".json"))
+
+
+def _read_protocol(entry: Traversable) -> Protocol:
+    return Protocol.model_validate_json(entry.read_bytes())
+
+
 @dataclass
 class Match:
     """A fingerprint hit: which protocol matched, why, and what got decoded."""
@@ -91,38 +104,20 @@ class Registry:
     @classmethod
     def load_bundled(cls) -> Registry:
         """Load only the protocols bundled with the package."""
-        protos: list[Protocol] = []
-        pkg = importlib.resources.files("flipper_mcp") / "protocols"
-        for entry in pkg.iterdir():
-            if entry.name.endswith(".json"):
-                data = json.loads(entry.read_text(encoding="utf-8"))
-                protos.append(Protocol(**data))
-        return cls(protos)
+        return cls([_read_protocol(entry) for entry in _json_files(_BUNDLED_DIR)])
 
     @classmethod
-    def load(cls, include_user_cache: bool = True) -> Registry:
+    def load(cls) -> Registry:
         """Load bundled protocols, overlaid with the user cache.
 
-        User-installed protocols with the same ``id`` as a bundled entry
-        override the bundled version. This is how remote-fetched updates
-        supersede the shipped defaults.
+        A user-installed protocol overrides a bundled one with the same ``id``,
+        so remote-fetched updates supersede the shipped defaults.
         """
-        protos: dict[str, Protocol] = {}
-        pkg = importlib.resources.files("flipper_mcp") / "protocols"
-        for entry in pkg.iterdir():
-            if entry.name.endswith(".json"):
-                data = json.loads(entry.read_text(encoding="utf-8"))
-                p = Protocol(**data)
-                protos[p.id] = p
-        if include_user_cache:
-            cache = user_cache_dir()
-            if cache.is_dir():
-                for entry in cache.iterdir():
-                    if entry.name.endswith(".json"):
-                        data = json.loads(entry.read_text(encoding="utf-8"))
-                        p = Protocol(**data)
-                        protos[p.id] = p
-        return cls(list(protos.values()))
+        files = list(_json_files(_BUNDLED_DIR))
+        cache = user_cache_dir()
+        if cache.is_dir():
+            files += _json_files(cache)
+        return cls([_read_protocol(entry) for entry in files])
 
     # -- querying ----------------------------------------------------------
 
@@ -227,8 +222,7 @@ def classify_file(content: str) -> dict:
 
     Recognizes SubGHz (raw + parsed), NFC, IR, LF-RFID, and iButton files.
     For decoded-protocol files, the protocol is surfaced as ``protocol_named``.
-    Returns an empty dict's kind=unknown shape if the file isn't a Flipper
-    save file.
+    Anything else returns ``kind: "unknown"``.
     """
     filetype = _extract_kv(content, "Filetype")
     if filetype is None:
@@ -260,11 +254,9 @@ def classify_file(content: str) -> dict:
 
 
 def _int_or_none(s: str | None) -> int | None:
-    if s is None:
-        return None
     try:
-        return int(s)
-    except (TypeError, ValueError):
+        return int(s) if s is not None else None
+    except ValueError:
         return None
 
 
@@ -286,9 +278,8 @@ def reset_registry() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Remote registry sync (L3) — fetch and install signed protocol JSON from a
-# trusted index URL into a per-user cache. Signature verification is stubbed
-# (sha256 only for now); the structure is ready for minisign/GPG later.
+# Remote registry sync: fetch protocol JSON from an index URL into a per-user
+# cache. An index SHA-256 checks integrity only; nothing is signed.
 # ---------------------------------------------------------------------------
 
 
@@ -344,14 +335,21 @@ def _require_http_url(url: str) -> None:
 _USER_AGENT = f"flipper-mcp/{__version__} (+registry-sync)"
 
 
-def fetch_index(url: str, timeout: float = 15.0) -> RemoteIndex:
-    """Download and parse a remote registry index."""
+def _download(url: str, timeout: float) -> bytes:
     _require_http_url(url)
     req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
     try:
-        return RemoteIndex(**data)
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.read()
+    except (OSError, http.client.HTTPException) as e:  # URLError, HTTPError, timeouts
+        raise RegistryError(f"Could not fetch {url}: {e}") from e
+
+
+def fetch_index(url: str, timeout: float = 15.0) -> RemoteIndex:
+    """Download and parse a remote registry index."""
+    body = _download(url, timeout)
+    try:
+        return RemoteIndex.model_validate_json(body)
     except ValidationError as e:
         raise RegistryError(f"Malformed registry index at {url}: {e}") from e
 
@@ -359,10 +357,7 @@ def fetch_index(url: str, timeout: float = 15.0) -> RemoteIndex:
 def install_from_entry(entry: RemoteProtocolEntry, timeout: float = 15.0) -> Path:
     """Download one protocol, verify sha256 if present, install into cache."""
     path = _cache_path(entry.id)
-    _require_http_url(entry.url)
-    req = urllib.request.Request(entry.url, headers={"User-Agent": _USER_AGENT})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        body = resp.read()
+    body = _download(entry.url, timeout)
 
     if entry.sha256:
         actual = hashlib.sha256(body).hexdigest().lower()
@@ -373,15 +368,12 @@ def install_from_entry(entry: RemoteProtocolEntry, timeout: float = 15.0) -> Pat
             )
 
     try:
-        proto_data = json.loads(body.decode("utf-8"))
-        Protocol(**proto_data)  # validate schema
-    except (ValidationError, json.JSONDecodeError) as e:
+        proto = Protocol.model_validate_json(body)
+    except ValidationError as e:
         raise RegistryError(f"Downloaded protocol {entry.id} failed validation: {e}") from e
 
-    if proto_data.get("id") != entry.id:
-        raise RegistryError(
-            f"Entry id {entry.id!r} does not match payload id {proto_data.get('id')!r}"
-        )
+    if proto.id != entry.id:
+        raise RegistryError(f"Entry id {entry.id!r} does not match payload id {proto.id!r}")
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(body)
@@ -402,10 +394,9 @@ def installed_protocols() -> list[str]:
     cache = user_cache_dir()
     if not cache.is_dir():
         return []
-    return sorted(entry.name[:-5] for entry in cache.iterdir() if entry.name.endswith(".json"))
+    return sorted(entry.name.removesuffix(".json") for entry in _json_files(cache))
 
 
 def bundled_protocols() -> list[str]:
     """List protocol IDs shipped with the package."""
-    pkg = importlib.resources.files("flipper_mcp") / "protocols"
-    return sorted(entry.name[:-5] for entry in pkg.iterdir() if entry.name.endswith(".json"))
+    return sorted(entry.name.removesuffix(".json") for entry in _json_files(_BUNDLED_DIR))

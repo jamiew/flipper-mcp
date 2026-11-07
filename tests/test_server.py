@@ -2,10 +2,32 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
 from mcp import Client
 
 from flipper_mcp import server
 from flipper_mcp.server import _hex_arg
+
+
+def _call(name: str, arguments: dict):
+    async def call():
+        async with Client(server.mcp) as client:
+            return await client.call_tool(name, arguments)
+
+    return asyncio.run(call())
+
+
+@pytest.fixture
+def device_calls(monkeypatch):
+    """Record any bridge use so a test can prove a tool never reached the device."""
+    calls = []
+
+    class RecordingBridge:
+        def __getattr__(self, method):
+            return lambda *args, **kwargs: calls.append(method) or ""
+
+    monkeypatch.setattr(server, "_get_bridge", RecordingBridge)
+    return calls
 
 
 def test_hex_arg_preserves_numeric_and_saved_byte_values():
@@ -21,27 +43,51 @@ def test_firmware_failure_is_an_mcp_error(monkeypatch):
             return "failed to load external command"
 
     monkeypatch.setattr(server, "_get_bridge", lambda: UnavailableNfc())
-
-    async def call():
-        async with Client(server.mcp) as client:
-            return await client.call_tool("nfc_detect", {"duration_s": 0})
-
-    result = asyncio.run(call())
+    result = _call("nfc_detect", {"duration_s": 0})
     assert result.is_error
     assert "failed to load external command" in result.content[0].text
 
 
-def test_file_inspect_reports_missing_file_as_error(monkeypatch):
+@pytest.mark.parametrize(
+    ("name", "arguments"),
+    [("flipper_file_inspect", {"path": "/ext/nope.sub"}), ("list_installed_apps", {})],
+)
+def test_storage_errors_are_mcp_errors(monkeypatch, name, arguments):
     class MissingFile:
-        def send(self, cmd, timeout):
+        def send(self, cmd, timeout=10.0):
             return "Storage error: file/dir not exist"
 
     monkeypatch.setattr(server, "_get_bridge", lambda: MissingFile())
-
-    async def call():
-        async with Client(server.mcp) as client:
-            return await client.call_tool("flipper_file_inspect", {"path": "/ext/nope.sub"})
-
-    result = asyncio.run(call())
+    result = _call(name, arguments)
     assert result.is_error
     assert "file/dir not exist" in result.content[0].text
+
+
+@pytest.mark.parametrize(
+    ("name", "arguments"),
+    [
+        ("power", {"action": "off"}),
+        ("ir_tx", {"protocol": "NEC", "address": "04", "command": "15"}),
+        ("ir_universal_send", {"category": "tv", "button": "Power"}),
+        ("subghz_tx_from_file", {"sub_file_path": "/ext/subghz/garage.sub"}),
+    ],
+)
+def test_gated_tools_refuse_before_touching_the_device(monkeypatch, device_calls, name, arguments):
+    monkeypatch.delenv("FLIPPER_ENABLE_TX", raising=False)
+    result = _call(name, arguments)
+    assert result.is_error
+    assert "FLIPPER_ENABLE_TX" in result.content[0].text
+    assert device_calls == []
+
+
+@pytest.mark.parametrize(
+    ("name", "arguments"),
+    [
+        ("power", {"action": "explode"}),
+        ("ir_universal_list", {"category": "toaster"}),
+        ("registry_describe", {"protocol_id": "no-such-protocol"}),
+    ],
+)
+def test_invalid_arguments_are_mcp_errors(device_calls, name, arguments):
+    assert _call(name, arguments).is_error
+    assert device_calls == []

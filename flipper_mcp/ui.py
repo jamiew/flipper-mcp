@@ -11,9 +11,8 @@ would with the button pad. Building on top of that, this module adds:
   reading modes (Sub-GHz Read, NFC Read, Infrared Learn) via ``loader open``
   plus a deterministic chain of button presses
 
-All of these produce structured dicts so the agent can see what it asked
-for and what the CLI echoed back (usually nothing — ``input send`` is
-silent on success).
+Results echo the CLI output, which is usually empty: ``input send`` is
+silent on success.
 """
 
 from __future__ import annotations
@@ -159,9 +158,8 @@ def run_sequence(
 # -- workflow macros -------------------------------------------------------
 #
 # Each macro launches a known on-device app, waits for it to render, and
-# then navigates into a specific submode via `input send`. These encode
-# the empirically-validated button chains — the kind of thing we worked
-# out by hand during v0.4 testing.
+# then navigates into a specific submode via `input send`, using button
+# chains worked out by hand on hardware.
 #
 # All macros are "best effort": if a firmware's menu order has shifted
 # they may land on the wrong submode. The agent can always verify via
