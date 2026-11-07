@@ -90,9 +90,19 @@ def hold_key(bridge: CliSender, key: str, duration_s: float) -> str:
     (which has fixed firmware-defined timing).
     """
     canonical = normalize_key(key)
+    _check_wait(duration_s)
     bridge.send(f"input send {canonical} press")
-    time.sleep(max(0.0, duration_s))
+    time.sleep(duration_s)
     return bridge.send(f"input send {canonical} release")
+
+
+# Tool calls hold the device lock, so a long wait blocks every other tool.
+_MAX_WAIT_S = 30.0
+
+
+def _check_wait(seconds: float) -> None:
+    if not 0 <= seconds <= _MAX_WAIT_S:
+        raise UIError(f"Waits must be between 0 and {_MAX_WAIT_S:g} seconds, got {seconds:g}.")
 
 
 # -- sequence DSL ----------------------------------------------------------
@@ -119,9 +129,11 @@ def parse_sequence(seq: str) -> list[Step]:
             rest = rest.strip()
             if prefix == "wait":
                 try:
-                    out.append(("wait", float(rest)))
+                    seconds = float(rest)
                 except ValueError as e:
                     raise UIError(f"wait: expected a number, got {rest!r}") from e
+                _check_wait(seconds)
+                out.append(("wait", seconds))
                 continue
             if prefix in {"short", "long", "press", "release"}:
                 out.append(("key", (normalize_key(rest), prefix)))

@@ -341,6 +341,15 @@ def smoke() -> int:
     )
     args = parser.parse_args()
 
+    # Same gate as the flipper_cli tool, so the shell can't sidestep it.
+    from .safety import gate_raw_command
+
+    try:
+        gate_raw_command(args.cmd)
+    except FlipperError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+
     try:
         bridge = FlipperBridge(port=args.port)
     except FlipperError as e:

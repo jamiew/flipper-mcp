@@ -19,6 +19,9 @@
   a traceback when its command fails.
 - `list_installed_apps` reports a storage error, such as a missing SD card,
   instead of zero installed apps.
+- `flipper-smoke --cmd` applies the same transmit gate as `flipper_cli`.
+- `flipper_hold_key` and `wait:` steps accept 0 to 30 seconds. Longer waits
+  held the device lock and blocked every other tool.
 
 ## 2026-11-01 — 0.6.0
 

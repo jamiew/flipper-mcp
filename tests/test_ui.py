@@ -75,12 +75,12 @@ def test_hold_key_emits_press_and_release(monkeypatch):
     assert slept == [0.5]
 
 
-def test_hold_key_clamps_negative_duration(monkeypatch):
-    slept = []
-    monkeypatch.setattr(time, "sleep", lambda s: slept.append(s))
+@pytest.mark.parametrize("seconds", [-1.0, 31.0, float("nan")])
+def test_hold_key_refuses_waits_outside_the_limit(seconds):
     b = FakeBridge()
-    ui.hold_key(b, "ok", duration_s=-1.0)
-    assert slept == [0.0]
+    with pytest.raises(ui.UIError):
+        ui.hold_key(b, "ok", duration_s=seconds)
+    assert b.calls == []
 
 
 # -- parse_sequence --------------------------------------------------------
@@ -108,9 +108,10 @@ def test_parse_sequence_rejects_unknown_prefix():
         ui.parse_sequence("bounce:ok")
 
 
-def test_parse_sequence_rejects_bad_wait():
+@pytest.mark.parametrize("step", ["wait:fast", "wait:-1", "wait:3600"])
+def test_parse_sequence_rejects_bad_wait(step):
     with pytest.raises(ui.UIError):
-        ui.parse_sequence("wait:fast")
+        ui.parse_sequence(step)
 
 
 # -- run_sequence ----------------------------------------------------------
