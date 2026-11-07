@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from flipper_mcp import registry as reg_mod
+from flipper_mcp import server
 from flipper_mcp.registry import (
     Registry,
     RegistryError,
@@ -219,6 +220,36 @@ def test_uninstall_removes_cached_file(isolated_cache):
 
 def test_uninstall_returns_false_for_missing(isolated_cache):
     assert uninstall_from_cache("never-existed") is False
+
+
+def test_remove_during_a_load_never_republishes_the_protocol(isolated_cache, monkeypatch):
+    isolated_cache.mkdir(parents=True, exist_ok=True)
+    (isolated_cache / "temporary.json").write_text(
+        json.dumps({**SAMPLE_PROTOCOL, "id": "temporary"})
+    )
+    loaded = threading.Event()
+    publish = threading.Event()
+    load = Registry.load
+
+    def slow_load():
+        result = load()
+        if not loaded.is_set():  # hold only the first load, after it read the file
+            loaded.set()
+            assert publish.wait(2.0)
+        return result
+
+    monkeypatch.setattr(Registry, "load", slow_load)
+    reader = threading.Thread(target=reg_mod.get_registry)
+    reader.start()
+    assert loaded.wait(2.0)
+    remover = threading.Thread(target=server.registry_remove, args=("temporary",))
+    remover.start()
+    remover.join(timeout=0.5)  # finishes here unless removal waits for the load
+    publish.set()
+    reader.join(2.0)
+    remover.join(2.0)
+    assert not (isolated_cache / "temporary.json").exists()
+    assert reg_mod.get_registry().get("temporary") is None
 
 
 def test_uninstall_cannot_escape_cache(isolated_cache):

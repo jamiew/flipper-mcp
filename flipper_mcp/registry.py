@@ -20,6 +20,7 @@ import importlib.resources
 import os
 import re
 import tempfile
+import threading
 import urllib.parse
 import urllib.request
 from collections.abc import Iterator
@@ -274,21 +275,27 @@ def _int_or_none(s: str | None) -> int | None:
         return None
 
 
-# Singleton — loaded on first call, resettable after mutating the cache.
+# Singleton — loaded on first call, invalidated whenever the cache changes.
 _registry: Registry | None = None
+# Registry tools run concurrently. One lock covers loading, publishing and
+# invalidating, so a load that overlaps a cache change never publishes a stale
+# result after the change. Downloads stay outside it.
+_registry_lock = threading.Lock()
 
 
 def get_registry() -> Registry:
     global _registry
-    if _registry is None:
-        _registry = Registry.load()
-    return _registry
+    with _registry_lock:
+        if _registry is None:
+            _registry = Registry.load()
+        return _registry
 
 
 def reset_registry() -> None:
     """Force the next get_registry() call to reload from disk."""
     global _registry
-    _registry = None
+    with _registry_lock:
+        _registry = None
 
 
 # ---------------------------------------------------------------------------
@@ -370,6 +377,7 @@ def fetch_index(url: str, timeout: float = 15.0) -> RemoteIndex:
 
 def install_from_entry(entry: RemoteProtocolEntry, timeout: float = 15.0) -> Path:
     """Download one protocol, verify sha256 if present, install into cache."""
+    global _registry
     path = _cache_path(entry.id)
     body = _download(entry.url, timeout)
 
@@ -390,20 +398,25 @@ def install_from_entry(entry: RemoteProtocolEntry, timeout: float = 15.0) -> Pat
         raise RegistryError(f"Entry id {entry.id!r} does not match payload id {proto.id!r}")
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    # Registry tools skip the device lock, so a concurrent load must never see half a file.
-    with tempfile.NamedTemporaryFile(dir=path.parent, suffix=".tmp", delete=False) as tmp:
-        tmp.write(body)
-    os.replace(tmp.name, path)
+    with _registry_lock:
+        # Atomic so a concurrent installed_protocols() never sees half a file.
+        with tempfile.NamedTemporaryFile(dir=path.parent, suffix=".tmp", delete=False) as tmp:
+            tmp.write(body)
+        os.replace(tmp.name, path)
+        _registry = None
     return path
 
 
 def uninstall_from_cache(protocol_id: str) -> bool:
     """Remove a cached protocol. Returns True if a file was removed."""
+    global _registry
     path = _cache_path(protocol_id)
-    try:
-        path.unlink()
-    except FileNotFoundError:
-        return False
+    with _registry_lock:
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            return False
+        _registry = None
     return True
 
 

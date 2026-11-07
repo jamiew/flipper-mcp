@@ -38,7 +38,6 @@ from .registry import (
     get_registry,
     install_from_entry,
     installed_protocols,
-    reset_registry,
     uninstall_from_cache,
     user_cache_dir,
 )
@@ -1055,7 +1054,6 @@ def registry_install(index_url: str, protocol_id: str) -> InstallResult:
     if entry is None:
         raise RegistryError(f"Protocol {protocol_id!r} not found in index {index_url}")
     path = install_from_entry(entry)
-    reset_registry()
     return InstallResult(
         installed=protocol_id,
         path=str(path),
@@ -1080,7 +1078,6 @@ def registry_remove(protocol_id: str) -> RemoveResult:
         raise RegistryError(
             f"{protocol_id!r} is not in the user cache. Bundled-only protocols cannot be removed."
         )
-    reset_registry()
     return RemoveResult(removed=protocol_id)
 
 
