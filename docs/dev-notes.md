@@ -13,9 +13,12 @@ Setup and commands live in [README.md](../README.md). Current work is in
   `rf_triage` prompt without opening USB.
 - SDK v2 executes sync tools on worker threads. Serialize complete tool
   operations as well as serial transactions; the device has one CLI session.
-- Every tool declares MCP hint annotations (read-only, destructive, open
-  world) so clients can auto-approve reads and confirm writes or transmits.
-  Hints are advisory; `FLIPPER_ENABLE_TX` is the real transmit gate.
+- Every tool except `flipper_cli` declares MCP hint annotations (read-only,
+  destructive, open world) so clients can auto-approve reads and confirm writes
+  or transmits. `flipper_cli` keeps the spec's worst-case defaults. Hints are
+  advisory; `FLIPPER_ENABLE_TX` is the real transmit gate. Tests fail if a tool
+  that calls `require_tx` is marked read-only.
+- Tools raise on bad input or failure. Never return an error string or dict.
 
 ## Transport invariants
 
@@ -43,6 +46,6 @@ Setup and commands live in [README.md](../README.md). Current work is in
 - Registry hashes check integrity, not publisher identity. Cache IDs must not
   escape their directory or write through symlink entries.
 
-The current suite has 132 passing tests, covering serial framing/concurrency,
-cleanup, safety gates, registry boundaries, IR parsing, and app lifecycle errors.
+The test suite covers serial framing/concurrency, cleanup, safety gates, tool
+hints, registry boundaries, IR parsing, and app lifecycle errors.
 Hardware effects still need the separate checks in the validation report.

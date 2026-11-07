@@ -6,12 +6,19 @@
   state, deletes or overwrites data, or reaches the outside world (radio,
   network). Clients can use this to auto-approve safe reads and confirm risky
   calls. `FLIPPER_ENABLE_TX` still gates transmit.
+  Tests now fail if a tool that transmits is labeled read-only.
 - The server reports its real version and sends short usage instructions to
   clients on connect. The registry User-Agent uses the same version.
 - Moved to MCP SDK 2.3, the `uv_build` backend and a `dev` dependency group.
   `uv sync --locked` now installs dev tools; `--extra dev` is gone.
 - Added `ty` type checking to CI and fixed the issues it found. CI now tests
   Python 3.11 through 3.15.
+- Registry fetches report unreachable URLs, HTTP errors, and malformed or
+  non-object index files as registry errors. `flipper-registry` printed a
+  traceback for these before. `flipper-smoke` now prints an error instead of
+  a traceback when its command fails.
+- `list_installed_apps` reports a storage error, such as a missing SD card,
+  instead of zero installed apps.
 
 ## 2026-11-01 — 0.6.0
 

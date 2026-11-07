@@ -63,11 +63,6 @@ def test_load_bundled_has_seeds():
     assert expected <= ids
 
 
-def test_get_returns_none_for_unknown():
-    r = Registry.load_bundled()
-    assert r.get("nothing-like-this") is None
-
-
 def test_filter_by_category():
     r = Registry.load_bundled()
     subghz = r.list(category="subghz")

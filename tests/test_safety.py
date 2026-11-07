@@ -21,7 +21,7 @@ def test_require_tx_allows_when_enabled(monkeypatch):
     require_tx("ir tx")  # no raise
 
 
-def test_check_tx_frequency(monkeypatch):
+def test_check_tx_frequency():
     check_tx_frequency(433_920_000)  # in band, no raise
     with pytest.raises(FlipperError):
         check_tx_frequency(121_500_000)  # aviation emergency, refused

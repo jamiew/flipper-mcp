@@ -134,8 +134,6 @@ def _tool(annotations: ToolAnnotations | None):
             try:
                 with _bridge_lock:
                     result = function(*args, **kwargs)
-                if isinstance(result, dict) and "error" in result:
-                    raise FlipperError(str(result["error"]))
                 output = result.get("raw_output") if isinstance(result, dict) else result
                 if isinstance(output, str):
                     _raise_on_cli_failure(output)
@@ -366,7 +364,7 @@ def power(action: str) -> str:
     }
     cmd = verbs.get(action)
     if cmd is None:
-        return f"error: unknown action {action!r}. Valid: {sorted(verbs)}."
+        raise ValueError(f"Unknown power action {action!r}. Valid: {sorted(verbs)}.")
     require_tx(f"power {action}")
     if action in ("off", "reboot", "reboot2dfu"):
         with contextlib.suppress(FlipperError):
@@ -426,7 +424,7 @@ def vibro(on: bool) -> str:
     return _get_bridge().send(f"vibro {1 if on else 0}")
 
 
-# -- storage mutation (v0.4) -----------------------------------------------
+# -- storage mutation -------------------------------------------------------
 
 
 @_tool(_DESTRUCTIVE)
@@ -464,7 +462,7 @@ def storage_md5(path: str) -> str:
     return _get_bridge().send(f"storage md5 {path}")
 
 
-# -- SubGHz raw capture (v0.4) ---------------------------------------------
+# -- SubGHz raw capture -----------------------------------------------------
 
 
 @_tool(_LISTEN)
@@ -499,7 +497,7 @@ def subghz_chat(
     return _get_bridge().stream(f"subghz chat {frequency_hz} {dev}", duration_s)
 
 
-# -- RFID / iButton (v0.4) -------------------------------------------------
+# -- RFID / iButton ---------------------------------------------------------
 
 
 @_tool(_LISTEN)
@@ -557,7 +555,7 @@ def ibutton_emulate(key_type: str, key_data: str, duration_s: float = 15.0) -> s
     return _get_bridge().stream(f"ikey emulate {key_type} {key_data}", duration_s)
 
 
-# -- GPIO (v0.4) -----------------------------------------------------------
+# -- GPIO -------------------------------------------------------------------
 
 
 @_tool(_READ)
@@ -587,7 +585,7 @@ def gpio_mode(pin: str, mode: str) -> str:
     return _get_bridge().send(f"gpio mode {pin} {modes[mode]}")
 
 
-# -- Loader / app control (v0.4) -------------------------------------------
+# -- loader / app control ---------------------------------------------------
 
 
 @_tool(_CONTROL)
@@ -622,7 +620,7 @@ def loader_list() -> str:
     return _get_bridge().send("loader list")
 
 
-# -- Recovery + introspection (v0.4) ---------------------------------------
+# -- recovery and introspection ---------------------------------------------
 
 
 @_tool(_CONTROL)
@@ -677,6 +675,7 @@ def list_installed_apps() -> dict:
     """
     b = _get_bridge()
     categories = b.send("storage list /ext/apps")
+    _raise_on_cli_failure(categories)
     result: dict = {"categories": {}, "total_apps": 0}
 
     for line in categories.splitlines():
@@ -700,7 +699,7 @@ def list_installed_apps() -> dict:
     return result
 
 
-# -- UI automation (v0.5) --------------------------------------------------
+# -- UI automation ----------------------------------------------------------
 
 
 @_tool(_CONTROL)
@@ -742,7 +741,7 @@ def flipper_input_sequence(sequence: str, step_delay_s: float = 0.05) -> list[st
     return run_sequence(_get_bridge(), sequence, step_delay_s=step_delay_s)
 
 
-# -- workflow macros (v0.5) ------------------------------------------------
+# -- workflow macros --------------------------------------------------------
 
 
 @_tool(_CONTROL)
@@ -779,15 +778,10 @@ def workflow_close_app() -> dict:
     return close_any_running_app(_get_bridge())
 
 
-# -- universal IR database (v0.5) ------------------------------------------
+# -- universal IR database --------------------------------------------------
 #
-# Flipper firmware ships a universal remote database covering common
-# categories (TV, AC, audio, fan) with named buttons like Power, VolUp,
-# Mute, etc. These tools wrap ``ir universal <category> <button>``
-# so the agent can drive common electronics without needing saved codes.
-#
-# Requires ``cli_ir.fal`` plugin loaded — same "failed to load external
-# command" caveat as ir_tx applies.
+# Firmware ships a universal remote database (TV, AC, audio, fans, ...) with
+# named buttons like Power and Mute. Needs the ``cli_ir.fal`` plugin, like ir_tx.
 
 
 _UNIVERSAL_CATEGORIES = {
@@ -803,15 +797,20 @@ _UNIVERSAL_CATEGORIES = {
 }
 
 
+def _universal_category(category: str) -> str:
+    cat = category.lower().strip()
+    if cat not in _UNIVERSAL_CATEGORIES:
+        raise ValueError(f"Unknown category {category!r}. Valid: {sorted(_UNIVERSAL_CATEGORIES)}.")
+    return cat
+
+
 @_tool(_READ)
 def ir_universal_list(category: str) -> str:
     """List the buttons available for a universal-remote category.
 
     category: tv | audio | ac | fans | bluray_dvd | digital_sign | leds | monitor | projectors.
     """
-    cat = category.lower().strip()
-    if cat not in _UNIVERSAL_CATEGORIES:
-        return f"error: unknown category {category!r}. Valid: {sorted(_UNIVERSAL_CATEGORIES)}."
+    cat = _universal_category(category)
     return _get_bridge().send(f"ir universal list {cat}")
 
 
@@ -826,14 +825,12 @@ def ir_universal_send(category: str, button: str) -> str:
     Example: turn off any TV in range:
         ir_universal_send(category="tv", button="Power")
     """
-    cat = category.lower().strip()
-    if cat not in _UNIVERSAL_CATEGORIES:
-        return f"error: unknown category {category!r}. Valid: {sorted(_UNIVERSAL_CATEGORIES)}."
+    cat = _universal_category(category)
     require_tx("ir universal send")
     return _get_bridge().send(f"ir universal {cat} {button}", timeout=120.0)
 
 
-# -- registry (L2) ---------------------------------------------------------
+# -- protocol registry ------------------------------------------------------
 
 
 @_tool(_READ)
@@ -864,10 +861,9 @@ def registry_describe(protocol_id: str) -> dict:
     """Return the full registry entry for one protocol id."""
     proto = get_registry().get(protocol_id)
     if proto is None:
-        return {
-            "error": f"Unknown protocol '{protocol_id}'. "
-            "Call registry_list() to see what's available."
-        }
+        raise RegistryError(
+            f"Unknown protocol {protocol_id!r}. Call registry_list() to see what's available."
+        )
     return proto.model_dump()
 
 
@@ -918,7 +914,7 @@ def ir_scan_and_identify(duration_s: float = 10.0) -> dict:
     }
 
 
-# -- remote registry sync (L3 proper) --------------------------------------
+# -- remote registry sync ---------------------------------------------------
 
 
 @_tool(_READ)
@@ -973,7 +969,7 @@ def registry_install(index_url: str, protocol_id: str) -> dict:
     idx = fetch_index(index_url)
     entry = next((e for e in idx.protocols if e.id == protocol_id), None)
     if entry is None:
-        return {"error": f"Protocol '{protocol_id}' not found in index {index_url}"}
+        raise RegistryError(f"Protocol {protocol_id!r} not found in index {index_url}")
     path = install_from_entry(entry)
     reset_registry()
     return {
@@ -992,18 +988,15 @@ def registry_remove(protocol_id: str) -> dict:
     affects the user cache. Reloads the registry so the change takes effect
     immediately.
     """
-    removed = uninstall_from_cache(protocol_id)
-    if removed:
-        reset_registry()
-        return {"removed": protocol_id}
-    return {
-        "error": (
-            f"'{protocol_id}' is not in the user cache. Bundled-only protocols cannot be removed."
+    if not uninstall_from_cache(protocol_id):
+        raise RegistryError(
+            f"{protocol_id!r} is not in the user cache. Bundled-only protocols cannot be removed."
         )
-    }
+    reset_registry()
+    return {"removed": protocol_id}
 
 
-# -- prompts (L3 hint) -----------------------------------------------------
+# -- prompts ----------------------------------------------------------------
 
 
 @mcp.prompt()

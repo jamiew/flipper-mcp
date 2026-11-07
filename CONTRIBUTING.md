@@ -13,14 +13,10 @@ makes the registry identify something it couldn't before.
 
 ### 1. Capture a sample first
 
-You need ground truth — output the Flipper produces when it sees the
-protocol. Typical workflow:
-
-```bash
-flipper-smoke --cmd "subghz rx 433920000 0"
-# press the remote / fob / transmitter you want to document
-# Ctrl-C after a few presses
-```
+You need ground truth: the output the Flipper produces when it sees the
+protocol. Call the `subghz_rx` tool from your MCP client (for example,
+433920000 Hz for 15 seconds) and press the remote, fob, or transmitter a few
+times during the window.
 
 Save the raw output. The decoded lines are what your fingerprint regex needs
 to match.
@@ -67,7 +63,7 @@ rolling-code, [`nec-ir.json`](flipper_mcp/protocols/nec-ir.json) for IR.
 ### 4. Validate locally
 
 ```bash
-flipper-registry validate flipper_mcp/protocols/your-new-protocol.json
+uv run --no-sync flipper-registry validate flipper_mcp/protocols/your-new-protocol.json
 ```
 
 ### 5. Add a test
@@ -117,14 +113,8 @@ Propose new packs in your PR description if none of the existing ones fit.
 
 ## Code contributions
 
-Standard workflow:
-
-```bash
-uv sync --locked
-uv run --no-sync ruff check flipper_mcp tests
-uv run --no-sync ty check
-uv run --no-sync pytest
-```
+Run the checks in the README's
+[development section](README.md#development-and-reference) before opening a PR.
 
 - Keep the bridge surface narrow. Each new MCP tool should map to a single
   Flipper CLI command or a tight, reusable workflow.

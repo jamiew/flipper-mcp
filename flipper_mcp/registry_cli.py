@@ -143,13 +143,9 @@ def cmd_validate(args: argparse.Namespace) -> int:
         print(f"error: {path} does not exist", file=sys.stderr)
         return 1
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        Protocol(**data)
-    except json.JSONDecodeError as e:
-        print(f"invalid JSON: {e}", file=sys.stderr)
-        return 1
+        Protocol.model_validate_json(path.read_bytes())
     except ValidationError as e:
-        print(f"schema error:\n{e}", file=sys.stderr)
+        print(f"invalid protocol:\n{e}", file=sys.stderr)
         return 1
     print(f"{path.name}: OK")
     return 0

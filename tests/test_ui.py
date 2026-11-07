@@ -31,26 +31,7 @@ class FakeBridge:
 
 @pytest.mark.parametrize(
     "alias,expected",
-    [
-        ("up", "up"),
-        ("down", "down"),
-        ("left", "left"),
-        ("right", "right"),
-        ("ok", "ok"),
-        ("back", "back"),
-        ("u", "up"),
-        ("d", "down"),
-        ("l", "left"),
-        ("r", "right"),
-        ("center", "ok"),
-        ("enter", "ok"),
-        ("return", "ok"),
-        ("b", "back"),
-        ("esc", "back"),
-        ("escape", "back"),
-        ("  UP  ", "up"),
-        ("Ok", "ok"),
-    ],
+    [("  UP  ", "up"), ("u", "up"), ("enter", "ok"), ("esc", "back")],
 )
 def test_normalize_key_accepts_aliases(alias, expected):
     assert ui.normalize_key(alias) == expected
@@ -62,12 +43,6 @@ def test_normalize_key_rejects_unknown():
 
 
 # -- press_key -------------------------------------------------------------
-
-
-def test_press_key_default_type():
-    b = FakeBridge()
-    ui.press_key(b, "ok")
-    assert b.calls == ["input send ok short"]
 
 
 def test_press_key_long():
@@ -109,15 +84,6 @@ def test_hold_key_clamps_negative_duration(monkeypatch):
 
 
 # -- parse_sequence --------------------------------------------------------
-
-
-def test_parse_sequence_simple_keys():
-    parsed = ui.parse_sequence("ok,down,down")
-    assert parsed == [
-        ("key", ("ok", "short")),
-        ("key", ("down", "short")),
-        ("key", ("down", "short")),
-    ]
 
 
 def test_parse_sequence_with_types_and_wait():

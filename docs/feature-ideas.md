@@ -2,11 +2,11 @@
 
 Prioritized additions drawn from the [landscape](landscape.md) gap analysis.
 Principle: extend Str1ck9's moat (signal *identification* + UI automation), don't
-just chase tool count. Grouped by leverage vs effort.
+just chase tool count. Grouped by leverage vs effort. Shipped items (emulation,
+tag writes, reboot, power, clock, I2C scan, and the TX safety gate) were removed.
 
-> Deeper, source-level version in [`opportunities.md`](opportunities.md): exact
-> CLI commands, file:line fixes, a staged protobuf-RPC plan, firmware specifics,
-> and a concrete safety model. That doc supersedes the tiers below where they overlap.
+> Deeper, source-level notes in [`opportunities.md`](opportunities.md): a staged
+> protobuf-RPC plan and firmware specifics.
 
 ## The transport question (blocks tier 1a)
 
@@ -31,10 +31,6 @@ existing CLI transport.
   yairhdz24 (`upload_file`, base64), millsymills (`fs_push`/`fs_pull`).
 
 **1b. Works over existing CLI transport:**
-- **Device emulation** — `nfc_emulate`, `rfid_emulate`, `ibutton_emulate`, and
-  `rfid_write`. This is the write-half of the clone workflow that pairs directly
-  with Str1ck9's read/identify tools. Have it: roostercoop, clipper, FlipperAgent.
-- **Reboot** (`reboot`, DFU mode). Trivial CLI command; currently absent.
 - **BadUSB run** — execute a DuckyScript already on the device. Str1ck9 can write
   the file but not launch it.
 
@@ -42,9 +38,8 @@ existing CLI transport.
 
 - **BadUSB generate + validate** — NL → DuckyScript with a safety validator.
   busse has a full 10-tool module (reusable, MIT).
-- **Power / battery / OTG info and control.** clipper, yairhdz24, millsymills.
-- **Housekeeping reads** — datetime get/set, `desktop_is_locked`,
-  `app_lock_status`, `app_get_error`, `i2c_scan`. Cheap, useful. millsymills.
+- **Housekeeping reads** — `desktop_is_locked`, `app_lock_status`,
+  `app_get_error`. Cheap, useful. millsymills.
 - **`find_my_flipper`** — one-shot buzz+LED locate. yairhdz24, pogorelov.
 - **Vision → IR/RF identification** — photograph a remote, identify the protocol.
   Pairs naturally with the fingerprint registry. promptzero has it.
@@ -58,15 +53,6 @@ existing CLI transport.
 - **Wireless transport** (WiFi bridge or BLE). Convenience, large effort.
 - **WiFi/Marauder, BLE recon/HID.** Whole domains; promptzero/FlipperAgent. Big
   scope, arguably a different product.
-
-## Cross-cutting: adopt a safety model before adding TX/emulation
-
-Str1ck9 currently executes every tool immediately. Before shipping emulation,
-BadUSB-run, or more TX, add gating. Best references:
-- **millsymills** — env flags (`ENABLE_TX_TOOLS` etc.) + per-call
-  `i_accept_responsibility` + a CLI risk classifier.
-- **clipper** — a single runtime `CLIPPER_SAFETY` toggle + a SubGHz frequency
-  allow-list. Simplest to adopt.
 
 ## Worth stealing regardless
 

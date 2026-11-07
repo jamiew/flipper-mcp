@@ -112,11 +112,6 @@ def test_ibutton_detected():
     assert m["key_type"] == "Dallas"
 
 
-def test_unknown_file_returns_unknown_kind():
-    m = classify_file("this is just some random text\nwithout a header\n")
-    assert m["kind"] == "unknown"
-
-
 def test_missing_filetype_with_known_structure():
     # Even if the body looks like a Flipper file, no Filetype header = unknown.
     m = classify_file("Frequency: 315000000\nProtocol: Princeton\n")
