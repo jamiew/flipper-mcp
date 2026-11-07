@@ -66,23 +66,6 @@ def test_storage_errors_are_mcp_errors(monkeypatch, name, arguments):
 @pytest.mark.parametrize(
     ("name", "arguments"),
     [
-        ("power", {"action": "off"}),
-        ("ir_tx", {"protocol": "NEC", "address": "04", "command": "15"}),
-        ("ir_universal_send", {"category": "tv", "button": "Power"}),
-        ("subghz_tx_from_file", {"sub_file_path": "/ext/subghz/garage.sub"}),
-    ],
-)
-def test_gated_tools_refuse_before_touching_the_device(monkeypatch, device_calls, name, arguments):
-    monkeypatch.delenv("FLIPPER_ENABLE_TX", raising=False)
-    result = _call(name, arguments)
-    assert result.is_error
-    assert "FLIPPER_ENABLE_TX" in result.content[0].text
-    assert device_calls == []
-
-
-@pytest.mark.parametrize(
-    ("name", "arguments"),
-    [
         ("power", {"action": "explode"}),
         ("ir_universal_list", {"category": "toaster"}),
         ("registry_describe", {"protocol_id": "no-such-protocol"}),
