@@ -25,9 +25,7 @@ Staged plan:
 
 **Firmware detection is the enabling primitive.** The fork has zero firmware awareness (grep for momentum/unleashed/roguemaster in `flipper_mcp/*.py` returns nothing). `device_info` prints `firmware_origin_fork` (`Momentum`/`Unleashed`/`RogueMaster`/`Official`), `firmware_version`, `hardware_region`, `hardware_region_provisioned`. Parse case-insensitively (the origin key name has shifted `firmware_origin` vs `origin` across versions; fall back to scanning for the four brand tokens), reuse `registry._extract_kv` (registry.py:238), cache on the bridge. Every downstream tool then decides whether TX is unlocked, whether `/int` is valid, and which decoders exist.
 
-**SubGHz frequency validation.** Stock firmware accepts only 299999755-348000000, 386999938-464000000, 778999847-928000000 Hz. Momentum/Unleashed RX is unrestricted; TX is gated behind the extended bands (~281-361/378-481/749-962 MHz), which require the SD-card file `extend_range.txt` plus, on Momentum, Settings>Protocols>SubGHz Extend+Bypass. This is a per-device toggle, not something the MCP controls, and the user's out-of-date Momentum may or may not have it enabled. Correct the `subghz_rx`/`rf_scan_and_identify` docstrings to say so, and add 315/348/390/430.5 MHz to example sweeps.
-
-**Unlock files the CLI can already write.** `extend_range.txt` (bare `true`/`false` at `/ext/subghz/assets/extend_range.txt`) and `setting_user.txt` (custom RX frequencies, hopper list, presets at `/ext/subghz/assets/setting_user.txt`) are both writable via the existing `write_file`, no transport change. Both are read at app/CLI start, so pair with `power reboot`. Gate on `firmware_detect` (Official ignores both).
+**SubGHz frequency validation.** Stock firmware accepts only 299999755-348000000, 386999938-464000000, 778999847-928000000 Hz. Custom firmware may accept other bands, but whether a frequency is legal to transmit on is the operator's responsibility and out of scope here. Correct the `subghz_rx`/`rf_scan_and_identify` docstrings to say so, and add 315/348/390/430.5 MHz to example receive sweeps.
 
 **Momentum storage-layout caveat.** Recent Momentum removed LittleFS internal storage: config now lives on SD, the former internal namespace relocated to `/ext/.int/`. `storage info /int` and `storage list /int` may error or return a degraded mount. Edit server.py:116-117 to prefer `/ext` and note `/int` may be vestigial. Older Momentum/Xtreme and stock still expose a real `/int`, so let `firmware_detect` gate the warning.
 
@@ -43,7 +41,6 @@ Staged plan:
 ### Works today over the CLI bridge (no RPC)
 
 - **`badusb_open()`** — `loader open "Bad USB"` only drops the user into the app's file browser; mainline `loader open` takes an app name, no file arg (verified `loader_cli.c`). Auto-running a chosen script needs RPC (below). Surface FlipperAgent's warning: BadUSB switches USB to HID and can drop the serial/RPC session mid-run.
-- **UI macro: launch SubGHz Bruteforcer (Unleashed/RM, low/medium).** `sub-brute` and Frequency Analyzer are FAP apps with no CLI entry point, reachable only through the existing UI-automation DSL (`flipper_input_sequence`, `workflow_*` in ui.py). Add a best-effort menu macro alongside ui.py:159; menu order shifts between firmware, so the macro must inspect the screen and is not guaranteed.
 
 ### Needs RPC (see Transport plan)
 

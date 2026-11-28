@@ -37,7 +37,7 @@ def test_mcp_json_server_starts(name, mode, era):
         async with Client(_params(SERVERS[name]), mode=mode) as client:
             assert client.protocol_version == era
             assert client.server_info is not None
-            assert client.server_info.version == version("flipper-mcp")
+            assert client.server_info.version == version("flipper-mcp-jamiew")
             tools = (await client.list_tools()).tools
             await client.list_prompts()
             await client.list_resources()
@@ -53,3 +53,18 @@ def test_mcp_json_server_starts(name, mode, era):
         assert hints is not None and hints.read_only_hint is not None, tool.name
         if not hints.read_only_hint:
             assert hints.destructive_hint is not None, tool.name
+
+
+def test_registry_entry_command_starts():
+    """server.json's package runs as `uvx <identifier>`, so that script must start the server."""
+    package = json.loads((ROOT / "server.json").read_text())["packages"][0]
+    args = ["--directory", str(ROOT), "run", "--no-sync", package["identifier"]]
+    entry = {"command": "uv", "args": args}
+
+    async def run():
+        async with Client(_params(entry)) as client:
+            return client.server_info, (await client.list_tools()).tools
+
+    info, tools = asyncio.run(run())
+    assert info is not None and info.version == version(package["identifier"])
+    assert tools

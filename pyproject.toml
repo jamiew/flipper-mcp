@@ -1,6 +1,7 @@
 [project]
-name = "flipper-mcp"
-version = "0.7.2"
+# flipper-mcp on PyPI is left for the upstream project this repo forks.
+name = "flipper-mcp-jamiew"
+version = "0.7.3"
 description = "MCP server for driving a Flipper Zero over USB-CDC serial, with a bundled RF/IR protocol registry."
 readme = "README.md"
 license = "MIT"
@@ -9,11 +10,16 @@ requires-python = ">=3.11"
 dependencies = [
   "anyio>=4,<5",
   "mcp>=2.3,<3",
-  "pyserial>=3.5",
+  "pyserial>=3.5,<4",
   "pydantic>=2.14,<3",
 ]
 
+[project.urls]
+Homepage = "https://github.com/jamiew/flipper-mcp"
+Issues = "https://github.com/jamiew/flipper-mcp/issues"
+
 [project.scripts]
+flipper-mcp-jamiew = "flipper_mcp.server:run"
 flipper-mcp = "flipper_mcp.server:run"
 flipper-smoke = "flipper_mcp.bridge:smoke"
 flipper-registry = "flipper_mcp.registry_cli:main"
@@ -30,6 +36,7 @@ requires = ["uv_build>=0.13.7,<0.14"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
+module-name = "flipper_mcp"
 module-root = ""
 
 [tool.pytest]

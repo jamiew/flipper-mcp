@@ -45,7 +45,7 @@ data: 9024 4512 564 564 564 1692
 NFC_FILE = """Filetype: Flipper NFC device
 Version: 4
 Device type: NTAG/Ultralight
-UID: 04 1D 7D AE 66 26 81
+UID: 04 11 22 33 44 55 66
 ATQA: 00 44
 SAK: 00
 """
@@ -96,7 +96,7 @@ def test_nfc_detected():
     m = classify_file(NFC_FILE)
     assert m["kind"] == "nfc"
     assert m["device_type"] == "NTAG/Ultralight"
-    assert m["uid"] == "04 1D 7D AE 66 26 81"
+    assert m["uid"] == "04 11 22 33 44 55 66"
 
 
 def test_rfid_detected():

@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-27 — 0.7.3
+
+- Published to PyPI as `flipper-mcp-jamiew` (`uvx flipper-mcp-jamiew`) and
+  listed in the MCP Registry as `io.github.jamiew/flipper-mcp`. Releases
+  publish both from `.github/workflows/publish.yml`.
+- The README now says plainly that `FLIPPER_ENABLE_TX` does not gate app
+  launches, button input, or storage writes, so on-device apps can still
+  transmit.
+
 ## 2026-11-07 — 0.7.2
 
 - Removing a protocol while another registry call was loading the registry

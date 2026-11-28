@@ -3,6 +3,7 @@
 A local MCP server for controlling a Flipper Zero over USB-CDC. Forked from
 [Str1ck9/flipper-mcp](https://github.com/Str1ck9/flipper-mcp), using the official
 MCP Python SDK v2, serialized USB transactions, and guarded transmission.
+Unofficial; not affiliated with Flipper Devices.
 
 **Resume work:** [PLAN.md](PLAN.md). **Evidence:** [hardware validation](docs/hardware-validation.md).
 
@@ -23,7 +24,17 @@ Hardware last checked September 22, 2026, on **Momentum mntm-012**:
 
 ## Setup
 
-Requires Python 3.11+, [uv](https://docs.astral.sh/uv/), and a USB data cable.
+Requires [uv](https://docs.astral.sh/uv/) and a USB data cable. The package is
+on PyPI as `flipper-mcp-jamiew`, so there's nothing to clone:
+
+```bash
+claude mcp add flipper -- uvx flipper-mcp-jamiew
+```
+
+Other MCP clients use `{"command": "uvx", "args": ["flipper-mcp-jamiew"]}`.
+Set `FLIPPER_PORT` to a serial device path if auto-detection picks the wrong one.
+
+To work on the server, run it from a checkout instead (Python 3.11+):
 
 ```bash
 git clone https://github.com/jamiew/flipper-mcp.git
@@ -59,14 +70,17 @@ uv run --no-sync flipper-smoke
 
 ## Safety and limits
 
-Transmission, emulation, credential writes, and destructive commands are
-**disabled by default**, including equivalent raw CLI commands. They require
+The transmit, emulate, credential-write, and power tools are **disabled by
+default**, along with the matching raw CLI commands. They require
 `FLIPPER_ENABLE_TX=1` in the server process. Enable it only for a specific,
 authorized operation, then end that process. Do not add it permanently to
 `.mcp.json` or enable it merely to run a sweep.
 
+The gate does not cover app launches, button input, or storage writes and
+deletes. An on-device app driven through those tools (Sub-GHz, Infrared,
+Bad USB, scripts) can still transmit, so watch the device during UI workflows.
 SubGHz frequency checks enforce hardware windows, not legal permission.
-Storage writes, GPIO changes, and app navigation still need operator care.
+GPIO changes also need operator care.
 Reader modes may energize LF-RFID/NFC tags. A capture is not proof of a working
 copy, and rolling codes should not be treated as replayable static commands.
 
@@ -137,6 +151,11 @@ uv run --no-sync ty check
 uv run --no-sync pytest
 ```
 
+To release, bump `version` in `pyproject.toml`, add a CHANGELOG entry, push, then
+publish a GitHub release tagged `vX.Y.Z`. `.github/workflows/publish.yml` checks
+the tag, runs the tests, publishes to PyPI, and lists `server.json` in the MCP
+Registry with the tag's version.
+
 - [IR capture and playback](docs/ir-tv-probing.md)
 - [Transport and SDK notes](docs/dev-notes.md)
 - [Changelog](CHANGELOG.md)
@@ -145,3 +164,5 @@ uv run --no-sync pytest
 
 Thanks to the upstream project and the USB/UI/IR work documented in the
 [landscape comparison](docs/landscape.md). MIT; see [LICENSE](LICENSE).
+
+<!-- mcp-name: io.github.jamiew/flipper-mcp -->

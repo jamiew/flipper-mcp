@@ -1,0 +1,36 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.jamiew/flipper-mcp",
+  "title": "Flipper Zero",
+  "description": "Drive a Flipper Zero over USB: storage, IR, Sub-GHz, RFID/NFC receive, apps; transmit is opt-in",
+  "repository": {
+    "url": "https://github.com/jamiew/flipper-mcp",
+    "source": "github"
+  },
+  "version": "0.7.3",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "flipper-mcp-jamiew",
+      "version": "0.7.3",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "FLIPPER_PORT",
+          "description": "Serial device path for the Flipper; auto-detected when unset",
+          "isRequired": false
+        },
+        {
+          "name": "FLIPPER_DEFAULT_DEVICE",
+          "description": "SubGHz radio: 0 = internal CC1101, 1 = external module on GPIO",
+          "isRequired": false,
+          "default": "0"
+        }
+      ]
+    }
+  ]
+}
